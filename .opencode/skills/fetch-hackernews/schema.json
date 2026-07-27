@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-knowledge-base/skills/fetch-hackernews/schema.json",
+  "title": "Hacker News Raw Markdown Front-matter",
+  "description": "fetch-hackernews 技能输出的原始 Markdown 文件 front-matter 结构。本文件是该技能输出格式的唯一机器可校验真相源；SKILL.md 的格式示例与字段表须与本文件保持一致。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["article_id", "title", "source_url", "source_platform", "source_score", "collected_at", "body"],
+  "properties": {
+    "article_id": {
+      "type": "string",
+      "pattern": "^kb-\\d{8}-\\d{4}$",
+      "description": "业务ID，格式 kb-YYYYMMDD-NNNN"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "条目标题，中文为主，保留专有名词英文"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "原始链接，须指向真实可访问页面"
+    },
+    "source_platform": {
+      "type": "string",
+      "const": "hackernews",
+      "description": "固定值，标识来源平台"
+    },
+    "source_score": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "来源热度 points"
+    },
+    "collected_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "采集时间，ISO 8601 UTC"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "description": "正文内容（外部文章正文或 HN 评论），Markdown 格式"
+    }
+  }
+}

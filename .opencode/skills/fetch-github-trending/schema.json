@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-knowledge-base/skills/fetch-github-trending/schema.json",
+  "title": "GitHub Trending Batch",
+  "description": "github-trending 技能输出的采集批次 JSON 结构。本文件是该技能输出格式的唯一机器可校验真相源；SKILL.md 的 JSON 示例与字段表须与本文件保持一致。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "skill", "collected_at", "items"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "github_trending",
+      "description": "固定值，标识数据来源平台"
+    },
+    "skill": {
+      "type": "string",
+      "const": "github-trending",
+      "description": "固定值，标识生成本文件的技能名"
+    },
+    "collected_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "采集时间，ISO 8601 UTC，如 2026-07-27T08:00:00Z"
+    },
+    "items": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 15,
+      "description": "候选条目数组，按 stars 降序，最多 15 条",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "url", "summary", "stars", "language", "topics"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[^/]+/[^/]+$",
+            "description": "仓库全名 owner/repo"
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https://github\\.com/[^/]+/[^/]+$",
+            "description": "仓库链接，须指向真实可访问页面"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 200,
+            "description": "中文摘要：项目名 + 做什么 + 为什么值得关注"
+          },
+          "stars": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "star 数"
+          },
+          "language": {
+            "type": "string",
+            "description": "主语言，无则为空字符串"
+          },
+          "topics": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "话题标签数组"
+          }
+        }
+      }
+    }
+  }
+}

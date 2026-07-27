@@ -48,13 +48,44 @@ Telegram 使用 HTML 或 Markdown 解析模式；飞书使用交互卡片消息�
    - `published_at` 填入当前 ISO 8601 UTC 时间
    - `published_channels` 追加已推送的渠道名
 5. 推送失败时保留 `reviewed` 状态并记录错误日志，不得标记为 `published`。
+6. **写前校验（闸门）**：每次推送须生成分发结果 JSON（结构以本目录 `schema.json` 为唯一真相源），含 `article_id`/`channel`/`status`/`attempted_at`/`published_at`/`error` 字段。**字段不全或类型不合法则禁止写入条目状态**，须修正后重试。
+7. **格式冲突仲裁**：若条目 JSON 已存在但字段缺失（如旧版无 `published_channels`），**禁止**降级省略字段；须补全字段后再更新，或记 `WARNING` 跳过并由人工介入。
 
 ## 约束
 
 - 禁止在 `published` 后修改条目内容（只能改为 `archived`）。
 - 禁止跳过审核直接推送 `pending` 条目。
+- **格式不可降级**：分发结果须严格符合本目录 `schema.json`；不得省略字段。
 - 禁止裸 `print()`，一律用 `logging`；日志不得输出 Token/Webhook URL 等敏感信息。
 - 禁止硬编码 API Key / Token。
 - 所有函数须有完整类型注解。
 
 完整规范见项目根目录 `AGENTS.md`。
+
+## 输出格式
+
+每次推送生成分发结果 JSON，结构以本目录 `schema.json` 为唯一真相源，以下示例仅供示意：
+
+```json
+{
+  "article_id": "kb-20260727-0001",
+  "channel": "telegram",
+  "status": "success",
+  "attempted_at": "2026-07-27T08:10:00Z",
+  "published_at": "2026-07-27T08:10:00Z",
+  "error": null
+}
+```
+
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `article_id` | string | 被推送的知识条目业务ID |
+| `channel` | string | 推送渠道 `telegram` / `feishu` |
+| `status` | string | `success` / `skipped`(已含该渠道) / `failed` |
+| `attempted_at` | string | 推送尝试时间，ISO 8601 UTC |
+| `published_at` | string\|null | 成功时填条目发布时间；失败/跳过为 null |
+| `error` | string\|null | 失败原因；成功/跳过为 null |
+
+> 字段表与 `schema.json` 须始终一致；如有变更，**先改 `schema.json`** 再同步本表与示例。

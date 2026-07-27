@@ -32,7 +32,11 @@ allowed-tools:
 
 6. **排序取 Top 15**：按 `stars` 降序排列，取前 15 条作为本批输出。若不足 15 条则全部保留，并在日志中说明原因。
 
-7. **输出 JSON**：将结果写入 `knowledge/raw/github-trending-YYYY-MM-DD.json`（日期取 UTC 当日）。文件结构见下方"输出格式"。
+7. **输出 JSON**：将结果写入 `knowledge/raw/github-trending-YYYY-MM-DD.json`（日期取 UTC 当日）。文件结构须严格符合本目录 `schema.json`（输出格式的唯一机器可校验真相源）。
+
+8. **写前校验（闸门）**：写盘前须用本目录 `schema.json` 校验待写数据：所有顶层字段（`source`/`skill`/`collected_at`/`items`）与每条 item 字段（`name`/`url`/`summary`/`stars`/`language`/`topics`）齐全且类型合法。**校验失败则禁止落盘**，须修正后重写，不得降级省略字段。
+
+9. **格式冲突仲裁**：若目标文件已存在但其结构不符合 `schema.json`（如旧版裸数组、字段缺失或字段名不同），**禁止**降级迁就旧字段格式追加。改写入 `github-trending-YYYY-MM-DD-batchN.json`（N 从 2 递增直至文件名不冲突），并在日志记 `WARNING` 说明跳过原文件原因。原文件保持不动（遵循红线第 1 条）。
 
 ## 注意事项
 
@@ -40,6 +44,7 @@ allowed-tools:
 - **超时**：单次 HTTP 请求超时 30s。
 - **并发**：若并发抓取，线程池 `max_workers ≤ 5`。
 - **原始文件只追加**：`knowledge/raw/` 中的文件只可追加，不可修改或删除。
+- **格式不可降级**：输出须严格符合本目录 `schema.json`；遇旧格式文件不得迁就旧字段，按 step 9 仲裁写入新文件。
 - **`source_url` 必须真实**：每条记录须指向真实可访问的仓库页面，禁止伪造。
 - **禁止裸 `print()`**：一律使用 `logging`。
 - **密钥安全**：`GITHUB_TOKEN` 从环境变量读取，禁止硬编码，禁止记入日志。
@@ -50,7 +55,7 @@ allowed-tools:
 
 ## 输出格式
 
-写入 `knowledge/raw/github-trending-YYYY-MM-DD.json`，结构如下：
+写入 `knowledge/raw/github-trending-YYYY-MM-DD.json`。结构以本目录 `schema.json` 为唯一真相源，以下示例仅供示意：
 
 ```json
 {
@@ -84,3 +89,5 @@ allowed-tools:
 | `items[].stars` | integer | star 数 |
 | `items[].language` | string | 主语言，无则为空字符串 |
 | `items[].topics` | string[] | 话题标签数组 |
+
+> 字段表与 `schema.json` 须始终一致；如有变更，**先改 `schema.json`** 再同步本表与示例。

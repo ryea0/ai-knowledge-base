@@ -68,5 +68,110 @@
     "source": "github_trending",
     "popularity": 20837,
     "summary": "李博杰著《深入理解 AI Agent：设计原理与工程实践》开源主仓库，包含全书正文、编译版 PDF 与按章配套代码，系统讲解 AI Agent 设计与实现。"
+  },
+  {
+    "title": "obra/superpowers: 代理技能框架与软件开发方法论",
+    "url": "https://github.com/obra/superpowers",
+    "source": "github_trending",
+    "popularity": 261657,
+    "summary": "Superpowers 是一个 Agentic 技能框架与软件开发方法论，采用子代理驱动开发模式，为 AI 编码 Agent 提供可复用技能体系，值得关注的方法论级项目。"
+  },
+  {
+    "title": "affaan-m/ECC: Agent 性能优化与记忆增强系统",
+    "url": "https://github.com/affaan-m/ECC",
+    "source": "github_trending",
+    "popularity": 233713,
+    "summary": "ECC 是面向 Claude Code、Codex、OpenCode、Cursor 等 AI 编码 Agent 的性能优化系统，提供技能、直觉、记忆、安全与研究优先开发能力，提升 Agent 工程效率。"
+  },
+  {
+    "title": "NousResearch/hermes-agent: 持续成长的个人 AI Agent",
+    "url": "https://github.com/NousResearch/hermes-agent",
+    "source": "github_trending",
+    "popularity": 221004,
+    "summary": "Hermes Agent 来自 Nous Research，定位为「随你一起成长」的 AI Agent，支持 Claude、Codex 等多模型接入，是开放研究组织推出的可演进 Agent 框架。"
+  },
+  {
+    "title": "anomalyco/opencode: 开源编码 Agent",
+    "url": "https://github.com/anomalyco/opencode",
+    "source": "github_trending",
+    "popularity": 189987,
+    "summary": "OpenCode 是开源编码 Agent，基于 TypeScript 构建，提供可扩展的 Agent 协作与技能体系，驱动 AI 知识库等项目的多 Agent 编排工作流。"
+  },
+  {
+    "title": "mattpocock/skills: 面向工程师的 Agent 技能库",
+    "url": "https://github.com/mattpocock/skills",
+    "source": "github_trending",
+    "popularity": 189888,
+    "summary": "Matt Pocock 整理的 Agent Skills 集合，直接来自其实际使用的 .agents 目录，为工程师提供即用型技能模板，适合快速构建 Agent 工作流。"
+  },
+  {
+    "title": "Significant-Gravitas/AutoGPT: 自主任务执行 AI Agent 平台",
+    "url": "https://github.com/Significant-Gravitas/AutoGPT",
+    "source": "github_trending",
+    "popularity": 185703,
+    "summary": "AutoGPT 致力于打造人人可用的自主 AI Agent 平台，支持自主任务分解与执行，集成 OpenAI、Claude、LLaMA 等多模型，是早期自主 Agent 的代表性项目。"
+  },
+  {
+    "title": "ollama/ollama: 本地大模型运行与管理工具",
+    "url": "https://github.com/ollama/ollama",
+    "source": "github_trending",
+    "popularity": 176952,
+    "summary": "Ollama 支持一键本地运行 Kimi-K2.6、GLM-5.2、DeepSeek、gpt-oss、Qwen、Gemma 等主流大模型，是本地 LLM 部署与推理的基础设施级工具。"
+  },
+  {
+    "title": "microsoft/markitdown: 文件转 Markdown 工具",
+    "url": "https://github.com/microsoft/markitdown",
+    "source": "github_trending",
+    "popularity": 169245,
+    "summary": "MarkItDown 是微软出品的文件与 Office 文档转 Markdown 工具，集成 LangChain、AutoGen 扩展，为 LLM 与 RAG 场景提供高质量文本预处理能力。"
+  },
+  {
+    "title": "f/prompts.chat: ChatGPT 提示词社区与自托管平台",
+    "url": "https://github.com/f/prompts.chat",
+    "source": "github_trending",
+    "popularity": 166403,
+    "summary": "prompts.chat 是社区驱动的 ChatGPT 提示词分享与收集平台，支持自托管以保证隐私，覆盖 GPT、Claude、Gemini 等主流模型，是 Prompt 工程实践资源。"
+  },
+  {
+    "title": "anthropics/skills: Anthropic 官方 Agent Skills 仓库",
+    "url": "https://github.com/anthropics/skills",
+    "source": "github_trending",
+    "popularity": 164377,
+    "summary": "Anthropic 官方维护的 Agent Skills 公共仓库，为 Claude 等 Agent 提供标准化技能定义，是理解 Agent 技能体系与最佳实践的一手参考。"
+  },
+  {
+    "title": "huggingface/transformers: 多模态模型训练与推理框架",
+    "url": "https://github.com/huggingface/transformers",
+    "source": "github_trending",
+    "popularity": 163015,
+    "summary": "Transformers 是 Hugging Face 出品的模型定义框架，覆盖文本、视觉、音频与多模态模型的训练与推理，支持 DeepSeek、Qwen、Gemma、GLM 等主流模型，生态核心基础设施。"
+  },
+  {
+    "title": "Snailclimb/JavaGuide: Java 后端与 AI 应用开发面试指南",
+    "url": "https://github.com/Snailclimb/JavaGuide",
+    "source": "github_trending",
+    "popularity": 157321,
+    "summary": "JavaGuide 是 Java 面试与后端通用指南，最新版新增 AI 应用开发、Agent、MCP、Spring AI、DeepSeek 集成等内容，反映 AI 能力向后端工程实践渗透的趋势。"
+  },
+  {
+    "title": "firecrawl/firecrawl: 大规模网页抓取与 AI 数据提取 API",
+    "url": "https://github.com/firecrawl/firecrawl",
+    "source": "github_trending",
+    "popularity": 156527,
+    "summary": "Firecrawl 提供大规模网页搜索、抓取与交互 API，将网页内容转为 Markdown 供 LLM 与 AI Agent 使用，是 RAG 与 Agent 数据采集层的关键工具。"
+  },
+  {
+    "title": "langflow-ai/langflow: 可视化 AI Agent 与工作流构建平台",
+    "url": "https://github.com/langflow-ai/langflow",
+    "source": "github_trending",
+    "popularity": 152450,
+    "summary": "Langflow 是构建与部署 AI Agent 和工作流的可视化工具，支持多 Agent 编排与生成式 AI 应用，降低 Agent 应用搭建门槛。"
+  },
+  {
+    "title": "langgenius/dify: Agentic 工作流与 RAG 管线构建平台",
+    "url": "https://github.com/langgenius/dify",
+    "source": "github_trending",
+    "popularity": 150345,
+    "summary": "Dify 是一站式 Agentic 工作流与 RAG 管线构建平台，支持丰富 AI 模型与工具集成，可云部署或自托管，助力团队从原型到生产快速落地。"
   }
 ]
