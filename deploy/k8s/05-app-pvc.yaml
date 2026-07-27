@@ -1,0 +1,16 @@
+# 知识数据 PVC - 持久化 knowledge/raw 和 knowledge/articles
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kb-data-pvc
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+    app.kubernetes.io/component: app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard

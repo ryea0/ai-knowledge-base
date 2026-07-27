@@ -1,0 +1,47 @@
+# docker-compose.yml - 本地开发与测试环境
+# 包含 MySQL 8.0 + AI 知识库应用
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: kb-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_knowledge_base}
+      MYSQL_USER: ${MYSQL_USER:-kb_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-kb_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: kb-app
+    restart: unless-stopped
+    env_file: ../../.env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ../../knowledge:/app/knowledge
+    command: ["--stage", "all"]
+
+volumes:
+  mysql_data:

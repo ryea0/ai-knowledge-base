@@ -1,0 +1,16 @@
+# 非敏感配置（明文 ConfigMap）
+# 密钥请放 02-secret.yaml，切勿在此文件写入任何 Token / Password
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kb-config
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+data:
+  MYSQL_HOST: "kb-mysql.ai-knowledge-base.svc.cluster.local"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "ai_knowledge_base"
+  MYSQL_USER: "kb_app"
+  LLM_MODEL: "doubao-pro"
+  LLM_API_BASE: ""

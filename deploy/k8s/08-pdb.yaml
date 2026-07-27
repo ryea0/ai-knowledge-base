@@ -1,0 +1,15 @@
+# PodDisruptionBudget - 保证滚动维护时至少 1 个 Pod 可用
+# 仅在 Deployment 模式下生效，CronJob 模式下预留
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kb-pdb
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-knowledge-base
+      app.kubernetes.io/component: app

@@ -1,0 +1,44 @@
+# HorizontalPodAutoscaler - 当工作负载转为 Deployment 时启用
+# 当前 CronJob 模式下不适用，保留供未来长驻服务使用
+---
+# 网络策略 - 限制出站流量仅允许必要目标
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kb-network-policy
+  namespace: ai-knowledge-base
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ai-knowledge-base
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ai-knowledge-base
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: mysql
+      ports:
+        - protocol: TCP
+          port: 3306
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

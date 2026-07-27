@@ -1,0 +1,142 @@
+# MySQL StatefulSet - 单节点 MySQL 8.0
+# 生产环境建议使用云托管 MySQL（RDS / PolarDB），此清单仅供开发/测试
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kb-mysql
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+    app.kubernetes.io/component: mysql
+spec:
+  serviceName: kb-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-knowledge-base
+      app.kubernetes.io/component: mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-knowledge-base
+        app.kubernetes.io/component: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kb-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: kb-config
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: kb-config
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kb-secret
+                  key: MYSQL_PASSWORD
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_0900_ai_ci
+            - --default-time-zone=+00:00
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: kb-mysql-pvc
+        - name: init-sql
+          configMap:
+            name: kb-init-sql
+---
+# MySQL Service - 集群内访问
+apiVersion: v1
+kind: Service
+metadata:
+  name: kb-mysql
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+    app.kubernetes.io/component: mysql
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3306
+      targetPort: 3306
+      name: mysql
+  selector:
+    app.kubernetes.io/name: ai-knowledge-base
+    app.kubernetes.io/component: mysql
+---
+# init.sql ConfigMap - 建表 DDL
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kb-init-sql
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+immutable: true
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS kb_article (
+        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        article_id      VARCHAR(32)      NOT NULL                COMMENT '业务ID',
+        title           VARCHAR(120)     NOT NULL                COMMENT '条目标题',
+        source_url      VARCHAR(512)     NOT NULL                COMMENT '原始链接',
+        source_platform VARCHAR(20)      NOT NULL                COMMENT '来源平台',
+        source_score    INT              NOT NULL DEFAULT 0      COMMENT '来源热度',
+        summary         VARCHAR(500)     NOT NULL                COMMENT 'AI生成中文摘要',
+        content_path    VARCHAR(255)     NOT NULL                COMMENT '原始内容文件路径',
+        tags            JSON             NOT NULL                COMMENT '标签数组',
+        category        VARCHAR(20)      NOT NULL                COMMENT '分类',
+        status          TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '状态',
+        language        CHAR(2)          NOT NULL DEFAULT 'zh'   COMMENT '原文语言',
+        collected_at    DATETIME(3)      NOT NULL                COMMENT '采集时间',
+        analyzed_at     DATETIME(3)      NULL                    COMMENT '分析完成时间',
+        published_at    DATETIME(3)      NULL                    COMMENT '发布时间',
+        published_channels JSON          NULL                    COMMENT '已推送渠道列表',
+        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_article_id (article_id),
+        KEY idx_source_url (source_url(255)),
+        KEY idx_status_created (status, created_at),
+        KEY idx_category (category)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='知识条目表';

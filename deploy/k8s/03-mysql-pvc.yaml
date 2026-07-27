@@ -1,0 +1,16 @@
+# MySQL PVC - 持久化数据卷
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kb-mysql-pvc
+  namespace: ai-knowledge-base
+  labels:
+    app.kubernetes.io/name: ai-knowledge-base
+    app.kubernetes.io/component: mysql
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
