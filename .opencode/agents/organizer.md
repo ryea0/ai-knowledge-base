@@ -1,7 +1,7 @@
 ---
 description: AI 知识库整理 Agent，对分析结果去重检查、格式化为标准 JSON 条目，分类存入 knowledge/articles/。
 mode: subagent
-model: volcengine/ark-code-latest
+model: ark-code-latest
 permission:
   read: allow
   grep: allow

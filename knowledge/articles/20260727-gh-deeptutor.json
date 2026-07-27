@@ -1,0 +1,24 @@
+{
+  "article_id": "kb-20260727-0007",
+  "title": "DeepTutor：终身个性化 AI 辅导系统（港大出品）",
+  "source_url": "https://github.com/HKUDS/DeepTutor",
+  "source_platform": "github_trending",
+  "source_score": 30084,
+  "summary": "DeepTutor 是香港大学数据科学实验室开发的 Agent 原生学习工作台，将辅导、解题、测验、研究、可视化和掌握练习统一在单一 Agent 循环上。支持多引擎 RAG（LlamaIndex/GraphRAG/LightRAG/Obsidian）、三层可检视记忆（L1 轨迹/L2 摘要/L3 综合）、持久化 AI 伙伴和 Co-Writer 编辑器，已发表 arXiv 论文。",
+  "score": 8,
+  "score_reason": "直接有帮助的教育 Agent 系统。Agent 循环统一多模式、可检视三层记忆、多引擎 RAG 的工程设计值得参考。港大实验室出品+arXiv 论文保证质量，但教育场景与通用 AI 工程关联度略偏。",
+  "highlights": [
+    "单一 Agent 循环驱动 Chat/Quiz/Research/Visualize/Solve/Mastery 六种模式，上下文随学习者流转",
+    "三层可检视记忆系统：L1 事件轨迹->L2 面摘要->L3 跨面综合，每条合成可溯源至原始事件",
+    "多引擎 RAG 库支持 LlamaIndex/PageIndex/GraphRAG/LightRAG/Obsidian 五种检索引擎"
+  ],
+  "content_path": "knowledge/raw/github-trending-2026-07-27.json",
+  "tags": ["agent", "rag", "memory", "education", "knowledge-graph", "multi-modal"],
+  "category": "tool",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-27T08:00:00Z",
+  "analyzed_at": "2026-07-27T10:30:00Z",
+  "published_at": null,
+  "published_channels": null
+}

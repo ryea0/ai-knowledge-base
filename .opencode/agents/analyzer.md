@@ -1,7 +1,7 @@
 ---
 description: AI 知识库分析 Agent，读取原始内容，生成中文摘要、亮点提炼、1-10 评分与标签建议，输出结构化 JSON。
 mode: subagent
-model: volcengine/ark-code-latest
+model: ark-code-latest
 permission:
   read: allow
   grep: allow

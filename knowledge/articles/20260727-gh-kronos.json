@@ -1,0 +1,24 @@
+{
+  "article_id": "kb-20260727-0005",
+  "title": "Kronos：金融市场 K 线基础模型（AAAI 2026）",
+  "source_url": "https://github.com/shiyu-coder/Kronos",
+  "source_platform": "github_trending",
+  "source_score": 34173,
+  "summary": "Kronos 是首个开源的金融市场 K 线（candlestick）基础模型，在 45+ 全球交易所数据上预训练。采用两阶段框架：专用 tokenizer 将 OHLCV 数据量化为分层离散 token，再用自回归 Transformer 预训练。提供 mini/small/base 三个尺寸，支持预测和微调，已被 AAAI 2026 接收。",
+  "score": 8,
+  "score_reason": "直接有帮助的学术+工程成果。将 LLM 的 tokenizer+autoregressive 范式创新性地应用于金融时间序列，填补了金融基础模型开源空白。AAAI 2026 接收保证了学术质量，微调流水线具备实用价值。",
+  "highlights": [
+    "首个开源金融 K 线基础模型，预训练数据覆盖 45+ 全球交易所",
+    "创新两阶段架构：专用 tokenizer 将连续 OHLCV 量化为分层离散 token，再训练自回归 Transformer",
+    "提供完整微调流水线（基于 Qlib），支持 A 股市场回测，已被 AAAI 2026 接收"
+  ],
+  "content_path": "knowledge/raw/github-trending-2026-07-27.json",
+  "tags": ["llm", "foundation-model", "time-series", "finance", "tokenization", "transformer", "fine-tuning"],
+  "category": "paper",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-27T08:00:00Z",
+  "analyzed_at": "2026-07-27T10:30:00Z",
+  "published_at": null,
+  "published_channels": null
+}

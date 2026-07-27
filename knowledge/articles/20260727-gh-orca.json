@@ -1,0 +1,24 @@
+{
+  "article_id": "kb-20260727-0008",
+  "title": "Orca：并行编码 Agent 舰队管理 ADE",
+  "source_url": "https://github.com/stablyai/orca",
+  "source_platform": "github_trending",
+  "source_score": 29732,
+  "summary": "Orca 是面向并行编码 Agent 的编排桌面应用，支持 Claude Code、Codex、OpenCode、Pi 等 25+ CLI Agent 在独立 git worktree 中并行运行。提供移动端伴侣（iOS/Android）远程监控、终端分屏、Design Mode UI 元素抓取、GitHub/Linear 集成和 SSH 远程 worktree。MIT 协议，支持 macOS/Windows/Linux。",
+  "score": 7,
+  "score_reason": "实用的编码 Agent 编排工具，并行 worktree 和移动端监控解决了多 Agent 协作的实际痛点。但作为桌面 ADE 应用，其技术深度和可复用性对非用户群体有限，更偏产品而非技术突破。",
+  "highlights": [
+    "一个 prompt 扇出至 5 个 Agent 各自独立 git worktree，可对比结果合并最优方案",
+    "移动端伴侣支持 iOS/Android，Agent 完成时推送通知，可远程发送后续指令",
+    "Design Mode 点击 Chromium 窗口中任意 UI 元素，将 HTML/CSS/截图直接注入 Agent prompt"
+  ],
+  "content_path": "knowledge/raw/github-trending-2026-07-27.json",
+  "tags": ["agent", "coding-agent", "parallel-execution", "git-worktree", "orchestration"],
+  "category": "tool",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-27T08:00:00Z",
+  "analyzed_at": "2026-07-27T10:30:00Z",
+  "published_at": null,
+  "published_channels": null
+}

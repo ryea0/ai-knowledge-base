@@ -1,0 +1,24 @@
+{
+  "article_id": "kb-20260727-0002",
+  "title": "WorldMonitor：AI 驱动的全球实时情报监控仪表盘",
+  "source_url": "https://github.com/koala73/worldmonitor",
+  "source_platform": "github_trending",
+  "source_score": 74763,
+  "summary": "WorldMonitor 是实时全球情报仪表盘，利用 AI 聚合 500+ 新闻源，提供地缘政治监控、基础设施追踪和金融雷达（29 个交易所）。支持 3D 地球仪与 WebGL 地图双引擎、31 国不稳定指数评分、6 个站点变体，可通过 Ollama 本地运行 AI，无需 API 密钥。",
+  "score": 7,
+  "score_reason": "功能丰富的情报聚合工具，AI 驱动的新闻合成与态势感知有实用价值。但主要面向地缘政治/金融监控场景，与 LLM/Agent 核心技术领域关联度中等，开发者直接上手价值有限。",
+  "highlights": [
+    "500+ 策展新闻源跨 15 个分类，AI 合成简报，支持跨流信号关联分析",
+    "31 个 Tier-1 国家的不稳定指数（CII v8）服务端权威评分",
+    "支持 Ollama 本地 AI，无需任何 API 密钥即可运行全功能"
+  ],
+  "content_path": "knowledge/raw/github-trending-2026-07-27.json",
+  "tags": ["agent", "rag", "news-aggregation", "monitoring", "visualization"],
+  "category": "tool",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-27T08:00:00Z",
+  "analyzed_at": "2026-07-27T10:30:00Z",
+  "published_at": null,
+  "published_channels": null
+}

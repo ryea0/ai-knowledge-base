@@ -1,0 +1,72 @@
+[
+  {
+    "title": "earendil-works/pi: 统一 LLM API 与编码 Agent CLI 工具包",
+    "url": "https://github.com/earendil-works/pi",
+    "source": "github_trending",
+    "popularity": 78083,
+    "summary": "AI Agent 工具包，提供统一的 LLM API 接口、Agent 循环、TUI 终端界面和编码 Agent CLI，支持多种大模型接入与自主编程任务执行。"
+  },
+  {
+    "title": "koala73/worldmonitor: AI 驱动的全球实时情报监控仪表盘",
+    "url": "https://github.com/koala73/worldmonitor",
+    "source": "github_trending",
+    "popularity": 74763,
+    "summary": "实时全球情报仪表盘，利用 AI 聚合新闻、监控地缘政治动态和基础设施状况，提供统一的态势感知界面。"
+  },
+  {
+    "title": "ComposioHQ/awesome-claude-skills: 精选 Claude Skills 资源与工具合集",
+    "url": "https://github.com/ComposioHQ/awesome-claude-skills",
+    "source": "github_trending",
+    "popularity": 70905,
+    "summary": "一个精心策划的 Claude Skills 资源列表，汇集了用于自定义 Claude AI 工作流的技能、资源和工具，方便开发者快速构建 Claude Agent 应用。"
+  },
+  {
+    "title": "rohitg00/ai-engineering-from-scratch: 从零开始的 AI 工程教程",
+    "url": "https://github.com/rohitg00/ai-engineering-from-scratch",
+    "source": "github_trending",
+    "popularity": 43771,
+    "summary": "从零学习并构建 AI 工程项目的开源教程，涵盖 AI 工程全链路实践，帮助开发者系统掌握 AI 应用开发与部署能力。"
+  },
+  {
+    "title": "shiyu-coder/Kronos: 金融市场语言基础模型",
+    "url": "https://github.com/shiyu-coder/Kronos",
+    "source": "github_trending",
+    "popularity": 34173,
+    "summary": "Kronos 是一个面向金融市场的基础模型（Foundation Model），将市场数据视为「语言」进行建模，用于金融时间序列预测与分析。"
+  },
+  {
+    "title": "diegosouzapw/OmniRoute: 免费 AI 网关，一个端点接入 290+ 提供商",
+    "url": "https://github.com/diegosouzapw/OmniRoute",
+    "source": "github_trending",
+    "popularity": 31054,
+    "summary": "免费 MIT 协议 AI 网关，一个端点统一接入 290+ 提供商（90+ 免费）、500+ 模型，支持 Claude Code、Cursor、Codex 等工具，具备配额感知自动降级和 token 压缩能力。"
+  },
+  {
+    "title": "HKUDS/DeepTutor: 终身个性化 AI 辅导系统",
+    "url": "https://github.com/HKUDS/DeepTutor",
+    "source": "github_trending",
+    "popularity": 30084,
+    "summary": "DeepTutor 是一个终身个性化辅导系统，利用 AI 提供自适应教学与学习路径规划，来自香港大学数据科学实验室。"
+  },
+  {
+    "title": "stablyai/orca: 并行 Agent 舰队管理 ADE",
+    "url": "https://github.com/stablyai/orca",
+    "source": "github_trending",
+    "popularity": 29732,
+    "summary": "Orca 是一个 Agent 开发环境（ADE），支持运行并行编码 Agent 舰队，可用自己的订阅在桌面、移动端和 VPS 上运行任意编码 Agent。"
+  },
+  {
+    "title": "tirth8205/code-review-graph: 本地优先的代码智能图谱工具",
+    "url": "https://github.com/tirth8205/code-review-graph",
+    "source": "github_trending",
+    "popularity": 26607,
+    "summary": "面向 MCP 和 CLI 的本地优先代码智能图谱工具，构建代码库持久化映射，让 AI 编码工具只读取关键上下文，大幅减少代码审查的 token 消耗。"
+  },
+  {
+    "title": "bojieli/ai-agent-book: 《深入理解 AI Agent》开源书籍",
+    "url": "https://github.com/bojieli/ai-agent-book",
+    "source": "github_trending",
+    "popularity": 20837,
+    "summary": "李博杰著《深入理解 AI Agent：设计原理与工程实践》开源主仓库，包含全书正文、编译版 PDF 与按章配套代码，系统讲解 AI Agent 设计与实现。"
+  }
+]

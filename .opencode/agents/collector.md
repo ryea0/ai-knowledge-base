@@ -1,7 +1,7 @@
 ---
 description: AI 知识库采集 Agent，从 GitHub Trending 和 Hacker News 搜索采集技术动态，输出结构化 JSON 候选列表。
 mode: subagent
-model: volcengine/ark-code-latest
+model: ark-code-latest
 permission:
   read: allow
   grep: allow

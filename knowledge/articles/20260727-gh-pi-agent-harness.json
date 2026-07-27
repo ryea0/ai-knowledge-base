@@ -1,0 +1,24 @@
+{
+  "article_id": "kb-20260727-0001",
+  "title": "Pi Agent Harness：统一 LLM API 与编码 Agent CLI 工具包",
+  "source_url": "https://github.com/earendil-works/pi",
+  "source_platform": "github_trending",
+  "source_score": 78083,
+  "summary": "Pi 是一套 AI Agent 工具包，包含统一多提供商 LLM API（OpenAI/Anthropic/Google）、Agent 运行时（工具调用与状态管理）、TUI 终端界面和交互式编码 Agent CLI。由 libGDX 作者 Mario Zechner 和 Flask 作者 Armin Ronacher 参与构建，采用 MIT 协议开源，具备供应链加固和容器化沙箱支持。",
+  "score": 8,
+  "score_reason": "实用工具/框架，开发者可直接上手构建 Agent 应用。由知名开源作者（Flask/libGDX 作者）驱动，工程质量高，但编码 Agent 赛道竞争激烈（Claude Code/Codex 等），非颠覆性突破。",
+  "highlights": [
+    "统一 LLM API 层抽象 OpenAI、Anthropic、Google 等多家提供商，一套接口即可切换模型",
+    "内置 Agent 运行时支持工具调用与状态管理，可自举构建编码 Agent",
+    "供应链安全加固：依赖精确版本锁定、npm shrinkwrap、CI 审计签名验证"
+  ],
+  "content_path": "knowledge/raw/github-trending-2026-07-27.json",
+  "tags": ["agent", "llm", "cli", "coding-agent", "multi-provider", "tool-calling"],
+  "category": "tool",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-27T08:00:00Z",
+  "analyzed_at": "2026-07-27T10:30:00Z",
+  "published_at": null,
+  "published_channels": null
+}

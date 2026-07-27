@@ -1,0 +1,24 @@
+{
+  "article_id": "kb-20260727-0006",
+  "title": "OmniRoute：免费 AI 网关，一个端点接入 250+ 提供商",
+  "source_url": "https://github.com/diegosouzapw/OmniRoute",
+  "source_platform": "github_trending",
+  "source_score": 31054,
+  "summary": "OmniRoute 是 MIT 协议的免费 AI 网关，单一端点统一接入 250+ 提供商（90+ 免费）、500+ 模型。支持 18 种路由策略和 4 层自动降级（订阅->API->廉价->免费），RTK+Caveman 双层压缩节省 15-95% token。内置 MCP 服务器（94 工具）、A2A 协议、护栏与记忆系统，兼容 Claude Code、Codex、Cursor 等 24+ 编码工具。",
+  "score": 8,
+  "score_reason": "直接有帮助的基础设施工具。解决了多 LLM 提供商管理的实际痛点，token 压缩和自动降级机制有工程价值。但网关/代理类项目赛道拥挤（LiteLLM/OpenRouter），差异化需靠压缩和路由策略维持。",
+  "highlights": [
+    "250+ 提供商 90+ 免费层聚合，月约 16 亿免费 token，4 层自动降级实现零停机",
+    "10 引擎压缩流水线（RTK/Caveman/LLMLingua-2 等），工具密集会话平均节省 ~89% token",
+    "内置 MCP 服务器（94 工具/30 作用域）和 A2A 协议，Agent 可自主驱动网关路由"
+  ],
+  "content_path": "knowledge/raw/github-trending-2026-07-27.json",
+  "tags": ["llm", "gateway", "mcp", "token-compression", "multi-provider", "routing", "agent"],
+  "category": "tool",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-27T08:00:00Z",
+  "analyzed_at": "2026-07-27T10:30:00Z",
+  "published_at": null,
+  "published_channels": null
+}
