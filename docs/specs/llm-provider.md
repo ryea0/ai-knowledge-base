@@ -108,7 +108,19 @@ CREATE TABLE kb_llm_provider (
 
 ### `kb_llm_model` 表结构
 
-不变，见 `deploy/sql/02_kb_llm_model.sql`。
+见 `deploy/sql/02_kb_llm_model.sql`。关键列说明：
+
+| 列 | 类型 | 默认 | 说明 |
+| -- | ---- | ---- | ---- |
+| `context_window` | INT | 4096 | 上下文窗口大小 tokens |
+| `max_output_tokens` | INT | 4096 | 最大输出 tokens |
+| `supports_streaming` | TINYINT(1) | 1 | 是否支持流式输出 |
+| `supports_function_calling` | TINYINT(1) | 0 | 是否支持函数调用 |
+| `supports_vision` | TINYINT(1) | 0 | 是否支持视觉/多模态 |
+| `supports_reasoning` | TINYINT(1) | 0 | 是否为推理模型（详见 §9.7） |
+| `input_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输入每百万 token 价格 USD，local=0 |
+| `output_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输出每百万 token 价格 USD，local=0 |
+| `source` | TINYINT | 0 | 来源 0=preset 1=discovered 2=manual |
 
 ### `kb_llm_health` 表结构
 
@@ -325,3 +337,145 @@ discover_models(provider_id):
 - `last_error` 字段须脱敏后写入，移除可能包含的 API Key 片段。
 - 供应商删除为软删除（`is_enabled=0`），保留历史日志引用完整性。
 - 模型删除时同步软删除对应的 `kb_llm_health` 行。
+
+---
+
+## §9.7 LLM 调用与响应处理
+
+> 实现见 `src/llm/client.py` / `src/llm/response.py` / `src/llm/response_extractor.py` / `src/llm/cost.py`。
+
+### 调用入口
+
+| 函数 | 返回类型 | 适用场景 |
+| ---- | -------- | -------- |
+| `chat_completion(provider, model, messages, ...)` | `LLMResponse`（非流式）/ 原始对象（流式） | 需要指定供应商/模型的精细调用 |
+| `chat_completion_with_retry(provider, model, messages, ...)` | 同上 | 在 `chat_completion` 基础上增加策略重试（§9.5） |
+| `quick_chat(prompt, session, ...)` | `str` | 便捷调用，自动路由 + 重试，仅需文本结果 |
+
+**调用约定**：
+
+- 非流式调用（`stream=False`，默认）统一返回 `LLMResponse`，调用方不再直接操作 LiteLLM 原始响应。
+- 流式调用（`stream=True`）返回 LiteLLM 原始响应对象，不封装为 `LLMResponse`（流式场景需要逐 chunk 处理）。
+- `quick_chat` 始终返回 `str`（从 `LLMResponse.content` 提取），适合摘要生成、标签提取等简单场景。
+
+### LLMResponse 统一返回体
+
+```python
+@dataclass(frozen=True)
+class LLMResponse:
+    content: str                              # 已提取的回复文本
+    usage: TokenUsage                         # Token 用量统计
+    cost: CostEstimate                        # 成本估算（USD）
+    model_code: str                           # 模型代码
+    provider_code: str                        # 供应商代码
+    latency_ms: int                           # 调用耗时（毫秒）
+    raw: dict[str, Any] | object              # 原始 LiteLLM 响应（高级用途）
+```
+
+**设计要点**：
+
+- `frozen=True`，不可变，防止调用方意外修改。
+- 通过 `LLMResponse.from_litellm_response(response, model, ...)` 工厂方法构造，内部自动调用 `extract_content` + `estimate_cost`，调用方无需关心提取逻辑。
+- `raw` 字段保留原始 LiteLLM 响应，供 tool_calls 解析等高级用途使用。
+- `usage` 和 `cost` 在响应无 `usage` 字段或模型无定价时返回零值，不抛异常。
+
+**调用方使用**：
+
+```python
+resp = chat_completion_with_retry(provider, model, messages, session=session)
+print(resp.content)                  # "你好！"
+print(resp.usage.total_tokens)       # 128
+print(resp.cost.total_cost_usd)      # 0.000123
+```
+
+### 推理模型响应提取（策略模式）
+
+不同供应商的推理模型将回复内容放在不同字段中：
+
+| 模型类型 | 响应字段 | 示例供应商 | 提取器 |
+| -------- | -------- | ---------- | ------ |
+| 标准 | `message.content` | GPT-4o, DeepSeek-Chat, Ollama | `StandardExtractor` |
+| 推理 | `message.reasoning_content`（`content` 为空时） | DeepSeek-R1/V4, Qwen3, Volcengine doubao | `ReasoningExtractor` |
+| Thinking 块 | `message.thinking_blocks`（`content` 为空时） | Claude extended thinking | `ThinkingBlockExtractor` |
+
+**`supports_reasoning` 字段语义**：
+
+- `kb_llm_model.supports_reasoning`（TINYINT(1)，默认 0）标记模型是否为推理模型。
+- `supports_reasoning=True` 时使用 `ReasoningExtractor`，`False` 时使用 `StandardExtractor`。
+- 模型发现（`discover_models`）时从 LiteLLM 注册表的 `supports_reasoning` 布尔值自动填充。
+- 手动创建模型时默认为 `False`，可由管理后台修改。
+
+**提取策略**：
+
+- **StandardExtractor**：直接取 `message.content`。
+- **ReasoningExtractor**：`content` 非空则返回 `content`；`content` 为空则回退 `reasoning_content`。这是因为推理模型在 `max_tokens` 不足时可能仅输出 `reasoning_content` 而 `content` 为空。
+- **ThinkingBlockExtractor**：`content` 非空则返回 `content`；否则从 `thinking_blocks` 列表中拼接 `thinking` 文本；最终回退 `reasoning_content`。
+
+**统一入口**：
+
+```python
+from src.llm.response_extractor import extract_content
+
+content = extract_content(response, model)
+```
+
+`extract_content(response, model)` 内部按 `model.supports_reasoning` 自动选择提取器，调用方无需关心字段差异。`extract_content` / `estimate_cost` 作为独立函数保留，供单元测试和 `LLMResponse.from_litellm_response` 内部调用。
+
+### 成本估算
+
+```python
+@dataclass(frozen=True)
+class TokenUsage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+@dataclass(frozen=True)
+class CostEstimate:
+    usage: TokenUsage
+    input_cost_usd: float
+    output_cost_usd: float
+    total_cost_usd: float
+```
+
+**定价来源**：`kb_llm_model.input_price_per_1m` / `output_price_per_1m`（每百万 token 的 USD 价格），由模型发现时从 LiteLLM 注册表自动填充，或手动配置。local 类型模型（Ollama / llama.cpp）定价为 0。
+
+**计算公式**：
+
+```
+input_cost  = (prompt_tokens / 1,000,000) * input_price_per_1m
+output_cost = (completion_tokens / 1,000,000) * output_price_per_1m
+total_cost  = input_cost + output_cost
+```
+
+**精度**：成本保留 6 位小数（`round(x, 6)`）。
+
+**使用方式**：
+
+```python
+from src.llm.cost import estimate_cost
+
+cost = estimate_cost(response, model)
+# 或通过 LLMResponse 直接访问
+resp = chat_completion_with_retry(provider, model, messages)
+resp.cost.total_cost_usd
+```
+
+### 模块文件索引
+
+| 文件 | 职责 |
+| ---- | ---- |
+| `src/llm/client.py` | LiteLLM 封装、调用入口、重试策略、`quick_chat` |
+| `src/llm/response.py` | `LLMResponse` dataclass + `from_litellm_response()` 工厂 |
+| `src/llm/response_extractor.py` | 响应内容提取器（策略模式：Standard / Reasoning / ThinkingBlock） |
+| `src/llm/cost.py` | `TokenUsage` / `CostEstimate` dataclass + `extract_usage` / `estimate_cost` |
+| `src/llm/router.py` | 供应商路由（按优先级 + 健康状态选择可用供应商-模型对） |
+
+### 公开导出
+
+以下符号从 `src.llm` 包顶层导出（`src/llm/__init__.py`）：
+
+- 调用入口：`chat_completion`、`chat_completion_with_retry`、`quick_chat`
+- 返回体：`LLMResponse`、`TokenUsage`、`CostEstimate`
+- 独立函数：`extract_content`、`estimate_cost`、`extract_usage`
+- 路由：`select_first_available`
