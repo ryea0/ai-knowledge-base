@@ -22,6 +22,7 @@ import pytest
 from src.llm.client import (
     LlmCallError,
     LlmErrorType,
+    LLMResponse,
     NetworkRetryStrategy,
     NoRetryStrategy,
     RateLimitRetryStrategy,
@@ -431,6 +432,9 @@ def _make_model_mock() -> MagicMock:
     model = MagicMock()
     model.model_code = "deepseek-chat"
     model.litellm_model = "deepseek/deepseek-chat"
+    model.supports_reasoning = False
+    model.input_price_per_1m = 0.0
+    model.output_price_per_1m = 0.0
     model.id = 1
     return model
 
@@ -572,7 +576,8 @@ class TestChatCompletionWithRetry:
                 provider, model, [{"role": "user", "content": "hi"}]
             )
 
-        assert result == mock_response
+        assert isinstance(result, LLMResponse)
+        assert result.content == "hello"
         assert mock_completion.call_count == 1
         mock_sleep.assert_not_called()
 
@@ -594,7 +599,8 @@ class TestChatCompletionWithRetry:
                 provider, model, [{"role": "user", "content": "hi"}]
             )
 
-        assert result == mock_response
+        assert isinstance(result, LLMResponse)
+        assert result.content == "hello"
         assert mock_completion.call_count == 2
         assert mock_sleep.call_count == 1
         mock_sleep.assert_called_with(1.0)
@@ -682,7 +688,8 @@ class TestChatCompletionWithRetry:
                 provider, model, [{"role": "user", "content": "hi"}]
             )
 
-        assert result == mock_response
+        assert isinstance(result, LLMResponse)
+        assert result.content == "ok"
         assert mock_completion.call_count == 2
         assert mock_sleep.call_count == 1
         mock_sleep.assert_called_with(1.0)

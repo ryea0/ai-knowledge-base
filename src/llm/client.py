@@ -29,6 +29,7 @@ import litellm
 
 from src.llm.auth_adapter import build_auth_context
 from src.llm.orm import LlmModel, LlmProvider
+from src.llm.response import LLMResponse
 from src.llm.utils import sanitize_secrets
 
 if TYPE_CHECKING:
@@ -230,7 +231,7 @@ def chat_completion(
     stream: bool = False,
     session: Session | None = None,
     **kwargs: Any,
-) -> dict[str, Any]:
+) -> LLMResponse | object:
     """调用 LLM 生成回复（非流式）。
 
     使用 LiteLLM 统一接口，通过 ``model.litellm_model`` 自动路由到对应供应商。
@@ -253,7 +254,8 @@ def chat_completion(
         **kwargs: 透传给 LiteLLM ``completion()`` 的额外参数。
 
     Returns:
-        LiteLLM 响应字典，含 ``choices`` / ``usage`` 等字段。
+        非流式调用返回 :class:`LLMResponse`（含 content / usage / cost）；
+        流式调用返回 LiteLLM 原始响应对象。
 
     Raises:
         LlmCallError: 调用失败（网络 / 鉴权 / 模型不存在等），携带 error_type。
@@ -336,7 +338,16 @@ def chat_completion(
             model_id=model.id,
             latency_ms=latency_ms,
         )
-    return dict(response) if not stream else response
+
+    if stream:
+        return response  # type: ignore[no-any-return]
+
+    return LLMResponse.from_litellm_response(
+        response,
+        model,
+        provider_code=provider.provider_code,
+        latency_ms=latency_ms,
+    )
 
 
 def chat_completion_with_retry(
@@ -349,7 +360,7 @@ def chat_completion_with_retry(
     stream: bool = False,
     session: Session | None = None,
     **kwargs: Any,
-) -> dict[str, Any]:
+) -> LLMResponse | object:
     """带策略重试的 LLM 调用。
 
     在 :func:`chat_completion` 基础上增加基于 :class:`RetryStrategy` 的重试逻辑。
@@ -369,7 +380,8 @@ def chat_completion_with_retry(
         **kwargs: 透传给 LiteLLM 的额外参数。
 
     Returns:
-        LiteLLM 响应字典。
+        非流式调用返回 :class:`LLMResponse`；
+        流式调用返回 LiteLLM 原始响应对象。
 
     Raises:
         LlmCallError: 所有重试耗尽后仍失败，抛出最后一次异常。
@@ -490,7 +502,63 @@ def _is_instance(exc: Exception, class_name: str) -> bool:
     return any(cls.__name__ == class_name for cls in type(exc).__mro__)
 
 
+def quick_chat(
+    prompt: str,
+    session: Session,
+    *,
+    system_prompt: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int | None = None,
+) -> str:
+    """一句话调用 LLM 的便捷函数。
+
+    自动从 DB 中选取最优供应商和默认模型（按优先级 + 健康状态路由），
+    发送单轮对话并返回纯文本响应。适合不需要精细控制供应商/模型的
+    简单调用场景（如摘要生成、标签提取）。
+
+    内部调用 :func:`chat_completion_with_retry`，已含重试和健康联动。
+
+    Args:
+        prompt: 用户提问文本。
+        session: SQLAlchemy Session（用于查询供应商/模型 + 健康联动）。
+        system_prompt: 可选的 system 消息，用于设定角色或上下文。
+        temperature: 采样温度，默认 0.7。
+        max_tokens: 最大输出 tokens，None 则使用模型默认值。
+
+    Returns:
+        LLM 生成的回复文本。
+
+    Raises:
+        LlmCallError: 所有路由候选均不可用或调用失败。
+        RuntimeError: 无可用供应商-模型组合。
+    """
+    from src.llm.router import select_first_available
+
+    pair = select_first_available(session)
+    if pair is None:
+        raise RuntimeError("无可用 LLM 供应商-模型组合")
+
+    provider, model = pair
+
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    response = chat_completion_with_retry(
+        provider,
+        model,
+        messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        session=session,
+    )
+
+    return response.content if isinstance(response, LLMResponse) else str(response)
+
+
 __all__ = [
+    "LLMResponse",
     "LlmCallError",
     "LlmErrorType",
     "NetworkRetryStrategy",
@@ -502,4 +570,5 @@ __all__ = [
     "TimeoutRetryStrategy",
     "chat_completion",
     "chat_completion_with_retry",
+    "quick_chat",
 ]

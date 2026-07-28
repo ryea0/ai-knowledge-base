@@ -385,6 +385,7 @@ def create_model(
         supports_streaming=data.supports_streaming,
         supports_function_calling=data.supports_function_calling,
         supports_vision=data.supports_vision,
+        supports_reasoning=data.supports_reasoning,
         input_price_per_1m=data.input_price_per_1m,
         output_price_per_1m=data.output_price_per_1m,
         is_enabled=data.is_enabled,
@@ -621,6 +622,7 @@ def discover_models(
                     "supports_function_calling", False
                 ),
                 supports_vision=info.get("supports_vision", False),
+                supports_reasoning=info.get("supports_reasoning", False),
                 input_price_per_1m=info.get("input_cost_per_token", 0.0)
                 * 1_000_000,
                 output_price_per_1m=info.get("output_cost_per_token", 0.0)

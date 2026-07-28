@@ -104,6 +104,8 @@ class LlmModel(BaseEntity):
         supports_streaming: 是否支持流式输出。
         supports_function_calling: 是否支持函数调用。
         supports_vision: 是否支持视觉/多模态。
+        supports_reasoning: 是否为推理模型（回复在 reasoning_content
+            或 thinking_blocks 而非 content）。
         input_price_per_1m: 输入每百万 token 价格 USD。
         output_price_per_1m: 输出每百万 token 价格 USD。
         is_enabled: 是否启用。
@@ -131,6 +133,9 @@ class LlmModel(BaseEntity):
         Integer, nullable=False, default=False
     )
     supports_vision: Mapped[bool] = mapped_column(
+        Integer, nullable=False, default=False
+    )
+    supports_reasoning: Mapped[bool] = mapped_column(
         Integer, nullable=False, default=False
     )
     input_price_per_1m: Mapped[float] = mapped_column(
