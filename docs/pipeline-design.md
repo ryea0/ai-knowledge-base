@@ -1,7 +1,7 @@
-# SPEC.md - 三 Agent 采集-分析-整理流水线（collector -> analyzer -> organizer）
+# pipeline-design.md - 三 Agent 采集-分析-整理流水线（collector -> analyzer -> organizer）
 
 > **来源**：合并自 GitHub Issue [#1](https://github.com/ryea0/ai-knowledge-base/issues/1)（MD 输出决策 + Pydantic 交接验证）与 Issue [#2](https://github.com/ryea0/ai-knowledge-base/issues/2)（开放问题决策 + Schema 扩展 + 单测试 seam + 运行时韧性）。
-> **权威基线**：`AGENTS.md`（项目协作约定）+ `draft/prd.md`（v0.1 草案）+ `docs/sub-agent-test-log.md`（实测发现）。
+> **权威基线**：`AGENTS.md`（项目协作约定）+ `draft/prd.md`（v0.1 草案）+ `docs/test/sub-agent-test-log.md`（实测发现）。
 > **范围**：聚焦「采集 -> 分析 -> 整理」三段，产出 `status: pending` 的知识条目（JSON source of truth + Markdown 渲染视图）；分发（Telegram/飞书、`status: published`）不在本 Spec 范围。
 
 ---
@@ -167,7 +167,7 @@
 
 ### 4.3 输出格式决策（MD vs JSON）
 
-- **JSON sidecar**（`knowledge/articles/<article_id>.json`）和 **MySQL `kb_article` 行**是权威的、可查询的 source of truth（按 AGENTS.md §4）。
+- **JSON sidecar**（`knowledge/articles/<article_id>.json`）和 **MySQL `kb_article` 行**是权威的、可查询的 source of truth（按 docs/specs/article-format.md §4）。
 - **organizer 额外输出 Markdown** 文件作为面向人类的制品。此 MD 是从结构化条目派生的渲染视图——它不是主存储。
 - **写入顺序**：DB（事务）-> JSON sidecar -> Markdown 渲染。如果 MD 渲染失败，条目仍持久化在 DB/JSON 中；MD 可由 `--stage render-md` 从 JSON sidecar 重建（G7）。MD 视为纯派生态，不纳入「一致性」校验，DB 不设 `md_rendered` 标志列。
 - MD 内容包括标题、摘要、亮点、标签、分类、来源 URL 和采集/分析时间戳，以人类可读布局呈现。
@@ -188,7 +188,7 @@
 
 - `CollectorCandidate` - 验证单个 collector 输出项（title, url, source, popularity, summary）。
 - `AnalyzerResult` - 验证 analyzer 输出对象（title, summary, highlights, score, score_reason, tags, category, language）。
-- `KnowledgeArticle` - 验证完整最终条目（AGENTS.md §4 的所有字段 + 扩展字段）。复用现有 `src/models/enums.py`（ArticleStatus, Category, SourcePlatform）枚举。
+- `KnowledgeArticle` - 验证完整最终条目（docs/specs/article-format.md §4 的所有字段 + 扩展字段）。复用现有 `src/models/enums.py`（ArticleStatus, Category, SourcePlatform）枚举。
 - **向后兼容**（G9）：`score`/`highlights`/`score_reason` 在 Pydantic 模型中设为 `Optional` 默认 `None`，以便读取现有 10 个旧 JSON 文件时容错；但 **organizer 写入逻辑强制填值**（写入前断言非 None），确保新条目不遗漏。旧文件不强制迁移。
 - 现有 `src/models/enums.py` 中的枚举是枚举值的唯一定义点；Pydantic 模型引用它们。
 
@@ -228,7 +228,7 @@
 
 - **索引决策**（G8）：**不新增 `score` 索引**。按 score 排序审核队列走文件排序（`ORDER BY score`，数据量小可接受），避免单表索引数达 §7.3 上限 5 个。现有 4 个索引（`uk_article_id`、`idx_source_url`、`idx_status_created`、`idx_category`）保持不变。
 - 这是对 §7.5 DDL 的有意识扩展，须同步更新 §7.5 与 §4（由实现者在本 Spec 落地时一并改 AGENTS.md——本 Spec 授权此改动）。
-- 来源于 `docs/sub-agent-test-log.md` 实测：整理 Agent 首次写入遗漏这三个字段，已列为 P1 修复项。
+- 来源于 `docs/test/sub-agent-test-log.md` 实测：整理 Agent 首次写入遗漏这三个字段，已列为 P1 修复项。
 
 ### 4.11 Article ID 生成（取号前置，G1）
 
@@ -246,11 +246,11 @@
 
 ### 4.12 状态机
 
-- 与 AGENTS.md §6.6 一致，无变更。新条目以 `pending` 开始（persist_raw 占位行即 pending）。organizer UPDATE 补全后仍为 `pending`。转换为 `reviewed` / `published` / `archived` 遵循现有矩阵。不新增状态。
+- 与 docs/specs/content-spec.md §6.6 一致，无变更。新条目以 `pending` 开始（persist_raw 占位行即 pending）。organizer UPDATE 补全后仍为 `pending`。转换为 `reviewed` / `published` / `archived` 遵循现有矩阵。不新增状态。
 
 ### 4.13 DB Schema
 
-- `kb_article` 表按 §4.10 扩展三列（score/score_reason/highlights），其余按 AGENTS.md §7.5 不变。
+- `kb_article` 表按 §4.10 扩展三列（score/score_reason/highlights），其余按 docs/specs/db-conventions.md §7.5 不变。
 - `content_path` 继续指向 `knowledge/raw/` 中的原始 MD 文件路径；organizer MD 输出路径按约定派生（`knowledge/articles/<article_id>.md`），不存储为单独列。
 - **不设 `md_rendered` 标志列**（G7 决策 B）：MD 是派生态，由 `--stage render-md` 重建。
 
@@ -269,12 +269,12 @@
 
 - **统一用 `httpx`**（已在 `pyproject.toml` 依赖中，支持 async/重试/连接池）。新建 `src/utils/http_client.py` 封装 httpx 客户端（含速率限制、指数退避、超时配置）。
 - **废弃 `urllib` 路径**：现有 `src/utils/github_api.py` 迁移至 httpx，或由 `http_client.py` 取代。
-- 速率限制遵守 AGENTS.md §6.1：GitHub API 匿名 ≥2s、带 Token ≥0.5s，HN API ≥1s；指数退避初始 1s 倍增上限 60s 最多 3 次；并发 `max_workers ≤ 5`；单次超时 30s，总超时 10 分钟。
+- 速率限制遵守 docs/specs/content-spec.md §6.1：GitHub API 匿名 ≥2s、带 Token ≥0.5s，HN API ≥1s；指数退避初始 1s 倍增上限 60s 最多 3 次；并发 `max_workers ≤ 5`；单次超时 30s，总超时 10 分钟。
 
 ### 4.17 红线对齐
 
 - raw 只追加、published 后不可改内容、source_url 必填、禁 print、禁硬编码密钥、禁跳类型注解、禁 pending 直推、禁采非 AI、禁编造、禁日志泄密、禁 rm -rf、禁改 AGENTS.md（本 Spec 授权的 schema 扩展除外）、禁乱放路径、禁 DB 外键/存储过程/触发器/视图、禁 SELECT *。
-- **事务边界**（G11）：raw MD 写入、JSON 投影、MD 渲染均在 DB 事务之外；事务内仅 INSERT/UPDATE，禁止远程调用（AGENTS.md §7.4 规则 6）。
+- **事务边界**（G11）：raw MD 写入、JSON 投影、MD 渲染均在 DB 事务之外；事务内仅 INSERT/UPDATE，禁止远程调用（docs/specs/db-conventions.md §7.4 规则 6）。
 
 ---
 
@@ -337,14 +337,14 @@
 
 ## 7. 补充说明
 
-- **MD 输出是渲染视图**（G7）：organizer 写入的 Markdown 从结构化 JSON 条目派生。如果 JSON 变更（如状态转换为 `published`），MD 可由 `--stage render-md` 重新生成。JSON/DB 仍按 AGENTS.md §4 为 source of truth。MD 不纳入一致性校验，DB 不设 `md_rendered` 列。
+- **MD 输出是渲染视图**（G7）：organizer 写入的 Markdown 从结构化 JSON 条目派生。如果 JSON 变更（如状态转换为 `published`），MD 可由 `--stage render-md` 重新生成。JSON/DB 仍按 docs/specs/article-format.md §4 为 source of truth。MD 不纳入一致性校验，DB 不设 `md_rendered` 列。
 - **权限模型是核心支柱**：collector 和 analyzer 刻意设为只读（无 write/edit/bash），确保未经审核的数据不会到达磁盘。organizer 是 `knowledge/articles/` 的唯一写入者；persist_raw 的 raw MD 写入与 DB 占位行 INSERT 在 graph 层（organizer 之外）执行，因 collector 无写权限。
 - **Agent 权限模型与 Python 实现的关系**（G5）：`.opencode/agents/*.md` 已定义 collector/analyzer/organizer 的权限矩阵，仅作为 prompt/权限文档。本 Spec 的 Python 实现是 graph 节点（普通 Python 函数），由主进程统一执行，**不通过 OpenCode subagent 运行时**。实测日志显示 subagent 因模型 ID 配置（`volcengine/ark-code-latest` 缺 `plan` 前缀）未启动——这是运行时配置问题，不在本 Spec 修复范围，graph 代码不依赖 subagent 隔离即可正确运行。
 - **`popularity` vs `source_score` 映射**（G13）：collector 输出字段 `popularity`，DB/JSON 字段 `source_score`。organizer 阶段将 `popularity` 映射为 `source_score` 持久化。GitHub 用总 star 数（与 trending 页面一致）、HN 用 points。
 - **README 分支容错**：实测日志 P2 指出单分支 404 阻塞分析。analyzer 的 HTTP fetcher 须自动尝试 `main` 后 `master`。
 - **JSON 合法性自检**：实测日志 P2 指出引号未转义导致解析失败。所有 JSON 写入前用 `json.dumps` 序列化后回读校验。
 - **`article_id` 与文件名一致性**：实测日志 P3 指出序号与文件名排序不一致。本 Spec 用取号前置（G1）+ `<article_id>.json` 命名从根本上消除该问题。
-- **AGENTS.md §4 需要后续编辑**以记录双输出（JSON source of truth + MD 渲染）决策，因为 §4 当前仅指定 JSON。该编辑由此 spec 跟踪，但 AGENTS.md 文件本身应由实现 agent 更新（需维护者批准，按红线第 12 条）。
+- **docs/specs/article-format.md §4 需要后续编辑**以记录双输出（JSON source of truth + MD 渲染）决策，因为 §4 当前仅指定 JSON。该编辑由此 spec 跟踪，但文档本身应由实现 agent 更新（需维护者批准，按红线第 12 条）。
 - **现有 agent 文件是基线**：三个 `.opencode/agents/*.md` 文件已包含详细的、结构良好的角色定义。本 spec 是更新而非从头重写——权限模型、质量自查清单和红线是合理的，应予保留。
 
 ---
@@ -362,7 +362,7 @@
 - [ ] 每次 agent 交接通过 Pydantic schema 验证；旧文件容错（score 可 None）（G9）
 - [ ] HTTP 速率限制 + 指数退避 + 并发≤5 + 超时 30s/10min；统一用 httpx（G10）
 - [ ] 密钥全走环境变量，日志无密钥
-- [ ] `kb_article` 表 DDL 扩展 score/highlights/score_reason 三列；不新增 score 索引（G8）（同步更新 AGENTS.md §4/§7.5）
+- [ ] `kb_article` 表 DDL 扩展 score/highlights/score_reason 三列；不新增 score 索引（G8）（同步更新 docs/specs/article-format.md §4 / docs/specs/db-conventions.md §7.5）
 - [ ] 状态转换用 CAS 条件更新
 - [ ] 标题去重：同批 Jaccard ≥0.8，保留 source_score 最高，其余 archived（G6）
 - [ ] `.opencode/agents/*.md` 三个文件更新（organizer 输出 MD + 双数据源）

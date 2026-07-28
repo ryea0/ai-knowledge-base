@@ -4,7 +4,7 @@
 统一管理 MySQL 连接池与事务生命周期。
 
 连接配置从 :func:`src.config.settings.get_settings` 读取，
-连接串格式见 AGENTS.md §2.4（``mysql+pymysql://...``）。
+连接串格式见 docs/specs/coding-standards.md §2.4（``mysql+pymysql://...``）。
 
 连接池策略：
     - ``pool_size=5``: 常驻连接数

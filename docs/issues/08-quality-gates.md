@@ -12,7 +12,7 @@
 - [ ] `uv run mypy src/` 干净通过（strict 模式）
 - [ ] `uv run pytest tests/ --cov=src --cov-fail-under=80` 通过，覆盖率 ≥ 80%
 - [ ] 补齐覆盖率缺口：低于阈值的模块补充测试（优先 `src/graph/`、`src/collectors/`、`src/analyzers/`、`src/organizers/`、`src/config/`、`src/utils/http_client.py`）
-- [ ] 测试套件覆盖 SPEC.md §8 完整的 Definition of Done 清单：
+- [ ] 测试套件覆盖 pipeline-design.md §8 完整的 Definition of Done 清单：
   - [ ] 4 节点 graph 端到端运行（G4）
   - [ ] persist_raw 取号前置（G1）
   - [ ] 产出 JSON sidecar + MD + DB 行

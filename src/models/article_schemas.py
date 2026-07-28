@@ -3,7 +3,7 @@
 用于前端 API 层校验，与 :mod:`src.models.article` 的 ORM 模型对应但不耦合。
 ORM -> Schema 转换在 Article Service 层完成。
 
-字段定义见 AGENTS.md §4，必填性对齐 §7.5 DDL 约束。
+字段定义见 docs/specs/article-format.md §4，必填性对齐 docs/specs/db-conventions.md §7.5 DDL 约束。
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class ArticleResponse(BaseModel):
 class ArticleCreate(BaseModel):
     """创建知识条目请求（由整理 Agent 构造）。
 
-    整合采集元信息与分析结果，字段对齐 AGENTS.md §4。
+    整合采集元信息与分析结果，字段对齐 docs/specs/article-format.md §4。
     ``article_id`` 由 DB 自增主键生成，不在请求中传入。
     """
 
@@ -110,7 +110,7 @@ class ArticleListQuery(BaseModel):
 class ArticleStatusUpdate(BaseModel):
     """状态流转请求。
 
-    须遵循 AGENTS.md §6.6 转换矩阵：
+    须遵循 docs/specs/content-spec.md §6.6 转换矩阵：
         - pending -> reviewed / archived
         - reviewed -> published / archived
         - published -> archived

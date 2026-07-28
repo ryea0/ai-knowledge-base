@@ -5,7 +5,7 @@
     - ``kb_llm_model``: 模型清单
     - ``kb_llm_health_log``: 健康检查日志（append-only）
 
-DDL 见 ``deploy/sql/01-04_*.sql``，约定见 AGENTS.md §9。
+DDL 见 ``deploy/sql/01-04_*.sql``，约定见 docs/specs/llm-provider.md §9。
 
 ``Base`` 和 ``BaseEntity`` 从 :mod:`src.common.base_entity` 导入并重新导出，
 保持 ``from src.llm.orm import Base`` 的向后兼容。
@@ -142,7 +142,8 @@ class LlmHealthLog(Base):
     可定期清理（建议保留 30 天），清理脚本放 ``scripts/`` 下。
 
     纯追加日志表，不继承 :class:`BaseEntity`（无 ``updated_at`` / ``is_deleted`` /
-    ``deleted_at``），仅保留 ``id`` + ``created_at``（见 §7.1 例外说明）。
+    ``deleted_at``），仅保留 ``id`` + ``created_at``
+    （见 docs/specs/db-conventions.md §7.1 例外说明）。
     """
 
     __tablename__ = "kb_llm_health_log"

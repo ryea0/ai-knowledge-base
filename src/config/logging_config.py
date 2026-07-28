@@ -9,7 +9,7 @@
 日志格式包含 traceId（通过 :class:`~src.common.trace.TraceIdFilter` 注入）：
     ``%(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s``
 
-对应 AGENTS.md §10.4 日志注入规则。
+对应 docs/specs/trace-spec.md §10.4 日志注入规则。
 
 Usage::
 

@@ -1,9 +1,9 @@
 """知识条目相关枚举定义。
 
 本模块是 status / category / source_platform 等枚举的**唯一定义点**。
-DB 存整数值，JSON 写字符串名；AGENTS.md §6.6 的映射表须与本文件保持一致。
-新增/变更状态须先改本文件，再同步 AGENTS.md。
-LLM 供应商相关枚举见本文件末尾 §9 部分，映射见 AGENTS.md §9。
+DB 存整数值，JSON 写字符串名；docs/specs/content-spec.md §6.6 的映射表须与本文件保持一致。
+新增/变更状态须先改本文件，再同步文档。
+LLM 供应商相关枚举见本文件末尾，映射见 docs/specs/llm-provider.md §9。
 """
 
 from enum import IntEnum
@@ -13,7 +13,7 @@ class ArticleStatus(IntEnum):
     """知识条目生命周期状态。
 
     DB 存 TINYINT（本枚举的整数值），JSON 写 ``.name`` 小写形式。
-    转换矩阵见 AGENTS.md §6.6。
+    转换矩阵见 docs/specs/content-spec.md §6.6。
     """
 
     PENDING = 0
@@ -48,7 +48,7 @@ class ArticleStatus(IntEnum):
 class Category(IntEnum):
     """知识条目内容分类。
 
-    判定标准见 AGENTS.md §6.5。DB 存 VARCHAR 字符串名（非 TINYINT），
+    判定标准见 docs/specs/content-spec.md §6.5。DB 存 VARCHAR 字符串名（非 TINYINT），
     因分类值可能扩展且无排序需求，直接存字符串更易读。
     """
 
@@ -85,7 +85,7 @@ class Category(IntEnum):
 class SourcePlatform(IntEnum):
     """知识条目来源平台。
 
-    新增来源须同步更新 AGENTS.md §4、§7.5 注释。
+    新增来源须同步更新 docs/specs/article-format.md §4、docs/specs/db-conventions.md §7.5 注释。
     """
 
     GITHUB_TRENDING = 0
@@ -119,7 +119,7 @@ class LlmProviderType(IntEnum):
     """LLM 供应商类型。
 
     DB 存 TINYINT（本枚举的整数值），JSON 写 ``.name`` 小写形式。
-    映射见 AGENTS.md §9.1。
+    映射见 docs/specs/llm-provider.md §9.1。
     """
 
     CLOUD = 0
@@ -154,7 +154,7 @@ class LlmAuthType(IntEnum):
 
     DB 存 TINYINT，JSON 写 ``.name`` 小写形式。
     主凭证统一存 ``api_key_encrypted``，附加凭证存 ``auth_config`` JSON。
-    映射见 AGENTS.md §9.1。
+    映射见 docs/specs/llm-provider.md §9.1。
     """
 
     BEARER = 0   # Authorization: Bearer <key>，仅需 api_key
@@ -190,7 +190,7 @@ class LlmHealthStatus(IntEnum):
     """LLM 供应商健康状态（类熔断器模式）。
 
     DB 存 TINYINT，JSON 写 ``.name`` 小写形式。
-    状态机转换规则见 AGENTS.md §9.2。
+    状态机转换规则见 docs/specs/llm-provider.md §9.2。
     """
 
     HEALTHY = 0    # 正常可用
@@ -226,7 +226,7 @@ class LlmModelSource(IntEnum):
     """LLM 模型记录来源。
 
     DB 存 TINYINT，JSON 写 ``.name`` 小写形式。
-    映射见 AGENTS.md §9.1。
+    映射见 docs/specs/llm-provider.md §9.1。
     """
 
     PRESET = 0     # 系统预置种子数据

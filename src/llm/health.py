@@ -3,7 +3,7 @@
 实现类熔断器状态机：
     healthy -> degraded -> unhealthy
 
-状态转换规则（CAS 乐观锁，见 AGENTS.md §9.2）：
+状态转换规则（CAS 乐观锁，见 docs/specs/llm-provider.md §9.2）：
     - 调用成功：``consecutive_failures`` 归零，状态转 ``healthy``
     - 调用失败：``consecutive_failures`` 递增
         - 达到 ``failure_threshold``：转 ``unhealthy``

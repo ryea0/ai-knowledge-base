@@ -1,5 +1,5 @@
 -- kb_llm_provider LLM 供应商表
--- DDL 定义见 AGENTS.md §9.1 / §7.5，本文件由 MySQL 容器初始化时自动执行
+-- DDL 定义见 docs/specs/llm-provider.md §9.1 / docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
 
 CREATE TABLE IF NOT EXISTS kb_llm_provider (
     id                   BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS kb_llm_provider (
     litellm_provider     VARCHAR(40)      NOT NULL                COMMENT 'LiteLLM 供应商标识，如 deepseek/openai/ollama',
     auth_type            TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '鉴权方式 0=bearer 1=oauth 2=header 3=none，枚举 LlmAuthType',
     api_key_encrypted    VARCHAR(255)     NULL                    COMMENT '加密后的主凭证，须应用层加解密，none 类型为 NULL',
-    auth_config          JSON             NULL                    COMMENT '鉴权附加配置，结构由 auth_type 决定（见 AGENTS.md §9.1）',
+    auth_config          JSON             NULL                    COMMENT '鉴权附加配置，结构由 auth_type 决定（见 docs/specs/llm-provider.md §9.1）',
     is_enabled           TINYINT(1) UNSIGNED NOT NULL DEFAULT 1   COMMENT '是否启用 0=禁用 1=启用',
     priority             INT              NOT NULL DEFAULT 100    COMMENT '路由优先级，数值越小优先级越高，同优先级按 id 升序',
     timeout_seconds      INT              NOT NULL DEFAULT 30     COMMENT '单次请求超时秒数，local 类型建议 120+',
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS kb_llm_provider (
     consecutive_failures INT              NOT NULL DEFAULT 0      COMMENT '连续失败次数，成功时归零',
     failure_threshold    INT              NOT NULL DEFAULT 5      COMMENT '连续失败达此值时 health_status 转 unhealthy',
     last_error           VARCHAR(500)     NULL                    COMMENT '最近错误信息（须脱敏，禁止含 API Key）',
-    -- 软删除（见 AGENTS.md §7.1 必选字段）
+    -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
     is_deleted           TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
     deleted_at           DATETIME(3)      NULL                    COMMENT '软删除时间',
     -- provider_code 唯一约束：软删除行 guard 列为 NULL（允许多个），未删除行为 'code:{provider_code}'

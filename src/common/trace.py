@@ -3,7 +3,7 @@
 基于 ``contextvars.ContextVar`` 实现线程安全的 traceId 传递，
 配合 :class:`TraceIdFilter` 自动注入日志记录，业务代码无需手动拼接。
 
-对应 AGENTS.md §10.2 ~ §10.4 规范。
+对应 docs/specs/trace-spec.md §10.2 ~ §10.4 规范。
 
 核心组件：
     - :data:`trace_id_var`: ContextVar，存储当前上下文的 traceId。

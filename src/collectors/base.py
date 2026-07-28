@@ -7,9 +7,9 @@
     3. 按热度排序并截取 top N。
     4. 返回结构化 JSON 候选列表（不落盘）。
 
-约束（见 AGENTS.md §6.1）：
+约束（见 docs/specs/content-spec.md §6.1）：
     - 采集前须查重（DB ``kb_article.source_url`` 或 ``knowledge/raw/``），已存在则跳过。
-    - 速率限制、重试策略、并发控制须遵守 §6.1 限流与重试约束。
+    - 速率限制、重试策略、并发控制须遵守 docs/specs/content-spec.md §6.1 限流与重试约束。
 """
 
 from __future__ import annotations

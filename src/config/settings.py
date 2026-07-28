@@ -1,7 +1,7 @@
 """全局配置加载。
 
 从环境变量（``.env`` 文件）读取配置项，提供 DB 连接串拼装。
-环境变量定义见 AGENTS.md §2.4。
+环境变量定义见 docs/specs/coding-standards.md §2.4。
 
 DB 连接串格式：``mysql+pymysql://{user}:{password}@{host}:{port}/{database}``
 禁止使用单一 ``DATABASE_URL`` 混合拼接。

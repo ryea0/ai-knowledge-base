@@ -11,7 +11,7 @@
     4. 慢请求（>1s）标记 WARNING 级别。
     5. 请求结束时清理 traceId ContextVar。
 
-对应 AGENTS.md §10.3 / §10.6 规范。
+对应 docs/specs/trace-spec.md §10.3 / §10.6 规范。
 
 Usage::
 

@@ -10,7 +10,7 @@
 
 ## 验收标准
 
-- [ ] `src/utils/http_client.py` 封装 `httpx`（G10），含：速率限制（GitHub 匿名 ≥2s / 带 Token ≥0.5s，HN ≥1s，见 §6.1）、指数退避（初始 1s、×2 倍增、上限 60s、429/5xx/网络错误最多重试 3 次）、单次请求超时 30s、`ThreadPoolExecutor max_workers ≤ 5`
+- [ ] `src/utils/http_client.py` 封装 `httpx`（G10），含：速率限制（GitHub 匿名 ≥2s / 带 Token ≥0.5s，HN ≥1s，见 docs/specs/content-spec.md §6.1）、指数退避（初始 1s、×2 倍增、上限 60s、429/5xx/网络错误最多重试 3 次）、单次请求超时 30s、`ThreadPoolExecutor max_workers ≤ 5`
 - [ ] 现有 `src/utils/github_api.py` 从 `urllib` 迁移至 `httpx`（或被 `http_client.py` 取代）
 - [ ] `src/collectors/` 实现 GitHub Trending 爬虫：解析 trending 列表，提取 title/url/stars，抓取 README
 - [ ] `src/collectors/` 实现 HN 采集器，使用 Official API（Firebase `https://hacker-news.firebaseio.com/v0/`，`/v0/topstories` + `/v0/item/<id>`，G15）；`popularity` = HN points

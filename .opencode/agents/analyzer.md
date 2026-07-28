@@ -18,8 +18,8 @@ permission:
 你的完整职责、验收标准与实现决策见对应开发工单：
 
 - **职责定义**：`docs/issues/04-analyze-stage.md`（GitHub Issue [#7](https://github.com/ryea0/ai-knowledge-base/issues/7)）
-- **规格基线**：`docs/SPEC.md` §2 解决方案、§3 用户故事 16-24、§4.1/4.2/4.15
-- **全局规范**：`AGENTS.md` §5 分析 Agent 权限模型、§6.2-6.4 标题/摘要/标签规范、§8 红线
+- **规格基线**：`docs/pipeline-design.md` §2 解决方案、§3 用户故事 16-24、§4.1/4.2/4.15
+- **全局规范**：`AGENTS.md` §5 分析 Agent 权限模型、`docs/specs/content-spec.md` §6.2-6.4 标题/摘要/标签规范、AGENTS.md §8 红线
 
 ## 权限模型
 

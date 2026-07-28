@@ -1,5 +1,5 @@
 -- kb_llm_model LLM 模型表
--- DDL 定义见 AGENTS.md §9.1 / §7.5，本文件由 MySQL 容器初始化时自动执行
+-- DDL 定义见 docs/specs/llm-provider.md §9.1 / docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
 
 CREATE TABLE IF NOT EXISTS kb_llm_model (
     id                        BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS kb_llm_model (
     source                    TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '来源 0=preset 1=discovered 2=manual，枚举 LlmModelSource',
     -- 每供应商至多一个默认模型：is_default=1 且未删除时 default_guard='p:{provider_id}'，唯一约束保证；其余为 NULL
     default_guard             VARCHAR(40)      AS (CASE WHEN is_default=1 AND is_deleted=0 THEN CONCAT('p:',provider_id) ELSE NULL END) STORED COMMENT '默认模型唯一约束辅助列',
-    -- 软删除（见 AGENTS.md §7.1 必选字段）
+    -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
     is_deleted                TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
     deleted_at                DATETIME(3)      NULL                    COMMENT '软删除时间',
     -- (provider_id, model_code) 唯一约束：软删除行 guard 列为 NULL，未删除行为 'pm:{provider_id}:{model_code}'

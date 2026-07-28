@@ -4,7 +4,7 @@
 
 ## 要构建什么
 
-新增 `--stage render-md` 重建路径（从 JSON sidecar 重建 Markdown 视图，不触碰 DB），并对齐文档制品与已实现的行为：三个 `.opencode/agents/*.md` 角色定义（organizer 现输出 MD + JSON sidecar + DB 行；collector 覆盖 GitHub Trending 与 Hacker News 双数据源），以及 AGENTS.md §4/§7.5 的 schema 扩展（本 Spec 授权的三个分析深度列）。
+新增 `--stage render-md` 重建路径（从 JSON sidecar 重建 Markdown 视图，不触碰 DB），并对齐文档制品与已实现的行为：三个 `.opencode/agents/*.md` 角色定义（organizer 现输出 MD + JSON sidecar + DB 行；collector 覆盖 GitHub Trending 与 Hacker News 双数据源），以及 docs/specs/article-format.md §4 / docs/specs/db-conventions.md §7.5 的 schema 扩展（本 Spec 授权的三个分析深度列）。
 
 本切片交付最终的 CLI 阶段，并消除文档与代码的漂移，使 prompt 与实现一致。
 
@@ -17,8 +17,8 @@
 - [ ] `.opencode/agents/collector.md` 更新：文档说明 GitHub Trending 与 Hacker News 均为一等数据源；权限模型不变（read/grep/glob/webfetch 允许；write/edit/bash 禁止）；输出契约不变（候选 JSON 数组）
 - [ ] `.opencode/agents/analyzer.md` 更新：权限模型不变（只读）；输出契约不变；文档说明 README main->master 容错行为
 - [ ] `.opencode/agents/organizer.md` 更新：**输出契约变更**--organizer 现交付 Markdown 文件 + JSON sidecar + DB 行（不再仅 JSON）；权限模型不变（read/grep/glob/write/edit 允许；webfetch/bash 禁止）；文件命名更新为 `<article_id>.json` / `<article_id>.md`（不再用 `{date}-{source}-{slug}`）
-- [ ] `AGENTS.md` §4 更新以记录双输出决策（JSON source of truth + MD 渲染视图）及 `score` / `highlights` / `score_reason` 扩展字段（§4.10）；§7.5 DDL 更新以包含三个新列；**不为 score 新建索引**（G8）--此编辑由 SPEC.md §4.10/§7 授权（红线第 12 条例外）
-- [ ] 工单 01 中已扩展的 `init.sql` 与此处 AGENTS.md §7.5 更新保持一致
+- [ ] `docs/specs/article-format.md` §4 更新以记录双输出决策（JSON source of truth + MD 渲染视图）及 `score` / `highlights` / `score_reason` 扩展字段（§4.10）；docs/specs/db-conventions.md §7.5 DDL 更新以包含三个新列；**不为 score 新建索引**（G8）--此编辑由 pipeline-design.md §4.10/§7 授权（红线第 12 条例外）
+- [ ] 工单 01 中已扩展的 `init.sql` 与此处 docs/specs/db-conventions.md §7.5 更新保持一致
 - [ ] Graph 测试覆盖 `render-md`：给定 JSON sidecar，MD 文件以正确结构重新生成；MD 不纳入 DB/JSON 一致性校验（G7）
 - [ ] `uv run ruff check src/ tests/` 通过
 - [ ] `uv run mypy src/` 通过

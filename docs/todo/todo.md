@@ -2,7 +2,7 @@
 
 - [x] 1. kb_article DDL + ORM + Schema
 - [ ] 2. Article Service 层（CRUD + 状态流转 CAS + DB->JSON 双写）
-- [ ] 3. trace.py + logging 配置（traceId 基础设施，AGENTS.md §10.7 T-01~T-10）
+- [x] 3. trace.py + logging 配置（traceId 基础设施，docs/specs/trace-spec.md §10.7 T-01~T-10）
 - [ ] 4. 统一 HTTP 客户端（含重试/限流/超时，src/utils/http_client.py）
 
 # P1 待办（核心业务链路）

@@ -3,7 +3,7 @@
 定义项目所有 ORM 模型共享的 :class:`Base`（声明式基类）和
 :class:`BaseEntity`（通用业务实体基类）。
 
-``BaseEntity`` 封装 AGENTS.md §7.1 要求的必选字段：
+``BaseEntity`` 封装 docs/specs/db-conventions.md §7.1 要求的必选字段：
     - ``id``: ``BIGINT UNSIGNED AUTO_INCREMENT`` 主键
     - ``created_at``: 创建时间，插入时自动填充
     - ``updated_at``: 更新时间，插入和更新时自动填充

@@ -1,6 +1,6 @@
 -- 本文件为 MySQL 容器初始化入口，按编号顺序加载 deploy/sql/ 下所有 .sql 文件。
 -- Docker 容器通过 volume 挂载 deploy/sql/ 到 /docker-entrypoint-initdb.d/ 自动执行。
--- DDL 定义见 AGENTS.md §7.5（kb_article）与 §9（LLM 供应商三张表）。
+-- DDL 定义见 docs/specs/db-conventions.md §7.5（kb_article）与 docs/specs/llm-provider.md §9（LLM 供应商三张表）。
 
 -- 1. 知识条目表（本文件内联定义，因早于 deploy/sql/ 拆分）
 CREATE TABLE IF NOT EXISTS kb_article (

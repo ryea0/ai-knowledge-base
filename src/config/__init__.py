@@ -3,7 +3,7 @@
 负责从环境变量（``.env`` 文件）解析配置，拼装 DB 连接串，
 并提供数据库引擎与会话管理。
 
-环境变量定义见 AGENTS.md §2.4。
+环境变量定义见 docs/specs/coding-standards.md §2.4。
 
 子模块：
     - ``settings``: 全局配置加载与 DB 连接串拼装

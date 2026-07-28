@@ -1,7 +1,7 @@
 -- kb_llm_health_log LLM 供应商健康检查日志表
 -- Append-only，无 UPDATE/DELETE，可定期清理（建议保留 30 天）
--- 日志表为纯追加表，不需要 updated_at / is_deleted / deleted_at（见 AGENTS.md §7.1 例外说明）
--- DDL 定义见 AGENTS.md §9.2 / §7.5，本文件由 MySQL 容器初始化时自动执行
+-- 日志表为纯追加表，不需要 updated_at / is_deleted / deleted_at（见 docs/specs/db-conventions.md §7.1 例外说明）
+-- DDL 定义见 docs/specs/llm-provider.md §9.2 / docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
 
 CREATE TABLE IF NOT EXISTS kb_llm_health_log (
     id           BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',

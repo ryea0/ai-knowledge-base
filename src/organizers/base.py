@@ -1,9 +1,9 @@
 """整理器抽象基类。
 
-整理器职责（见 AGENTS.md §5、§4）：
+整理器职责（见 AGENTS.md §5、docs/specs/article-format.md §4）：
     1. 接收采集元信息 + 分析 JSON 产出。
     2. 去重检查（查 DB ``kb_article.source_url`` 或 ``knowledge/raw/``）。
-    3. 格式化为标准 JSON 知识条目（字段定义见 §4）。
+    3. 格式化为标准 JSON 知识条目（字段定义见 docs/specs/article-format.md §4）。
     4. 写入 DB（事务内，先 INSERT 取 id，再回填 article_id）。
     5. 同步投影至 ``knowledge/articles/<article_id>.json``。
     6. 初始状态为 ``pending``。
@@ -41,7 +41,7 @@ class BaseOrganizer(ABC):
             **kwargs: 子类特定参数。
 
         Returns:
-            格式化后的标准知识条目 dict（见 §4 字段定义）；
+            格式化后的标准知识条目 dict（见 docs/specs/article-format.md §4 字段定义）；
             若去重检查判定为重复则返回 ``None``。
 
         Raises:

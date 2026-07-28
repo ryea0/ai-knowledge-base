@@ -1,5 +1,5 @@
 -- kb_article 知识条目表
--- DDL 定义见 AGENTS.md §7.5，本文件由 MySQL 容器初始化时自动执行
+-- DDL 定义见 docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
 -- article_id 由 DB 自增主键 id 生成（kb-YYYYMMDD-NNNN），天然唯一，无需软删除 guard 列
 -- source_platform / category 存 VARCHAR 字符串名（非 TINYINT），见 src/models/enums.py 注释
 
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS kb_article (
     score               TINYINT UNSIGNED NULL                    COMMENT 'analyzer 评分 1-10（SPEC §4.10 扩展），未分析为 NULL',
     score_reason        VARCHAR(500)     NULL                    COMMENT '评分理由（SPEC §4.10 扩展）',
     highlights          JSON             NULL                    COMMENT '亮点数组（SPEC §4.10 扩展）',
-    -- 软删除（见 AGENTS.md §7.1 必选字段）
+    -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
     is_deleted          TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
     deleted_at          DATETIME(3)      NULL                    COMMENT '软删除时间',
     created_at          DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',

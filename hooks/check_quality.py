@@ -29,7 +29,7 @@ from typing import Any
 # 常量定义
 # ---------------------------------------------------------------------------
 
-# 技术关键词（摘要中出现则奖励），对齐 AGENTS.md §6.1 采集关键词
+# 技术关键词（摘要中出现则奖励），对齐 docs/specs/content-spec.md §6.1 采集关键词
 TECH_KEYWORDS: set[str] = {
     "llm", "gpt", "transformer", "fine-tuning", "rag", "agent",
     "multimodal", "embedding", "vllm", "langchain", "llama", "diffusion",
@@ -37,7 +37,7 @@ TECH_KEYWORDS: set[str] = {
     "openai", "pytorch", "tensorflow", "mcp",
 }
 
-# 标准标签白名单（对齐 AGENTS.md §6.4: 禁止 ai/tech/other 等过宽标签）
+# 标准标签白名单（对齐 docs/specs/content-spec.md §6.4: 禁止 ai/tech/other 等过宽标签）
 STANDARD_TAGS: set[str] = {
     "llm", "gpt", "transformer", "fine-tuning", "rag", "agent",
     "multimodal", "embedding", "vllm", "langchain", "llama", "diffusion",

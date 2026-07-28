@@ -1,7 +1,8 @@
 """知识条目 SQLAlchemy ORM 模型。
 
 对应 DB 表 ``kb_article``，DDL 见 ``deploy/sql/05_kb_article.sql``，
-字段定义见 AGENTS.md §4 / §7.5，SPEC §4.10 扩展字段（score/highlights/score_reason）。
+字段定义见 docs/specs/article-format.md §4 / docs/specs/db-conventions.md §7.5，
+SPEC §4.10 扩展字段（score/highlights/score_reason）。
 
 数据权威：MySQL ``kb_article`` 表为知识条目的唯一 source of truth；
 ``knowledge/articles/<id>.json`` 为 DB 记录的磁盘投影，可从 DB 重建。

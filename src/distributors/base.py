@@ -1,12 +1,12 @@
 """分发器抽象基类。
 
-分发器职责（见 AGENTS.md §5、§6.6）：
+分发器职责（见 AGENTS.md §5、docs/specs/content-spec.md §6.6）：
     1. 接收已审核（``reviewed``）的知识条目。
     2. 格式化为渠道特定消息格式。
     3. 调用渠道 API 推送消息。
     4. 推送成功后在同一事务内更新 ``published_channels`` 和 ``status``/``published_at``。
 
-分发幂等（见 §6.6 第 5 条）：
+分发幂等（见 docs/specs/content-spec.md §6.6 第 5 条）：
     - 推送前须先查 ``published_channels`` 是否已含目标渠道，含则跳过。
     - 状态须在 ``reviewed`` 时方可分发。
     - 禁止从 ``pending`` 直接推送。
@@ -38,7 +38,7 @@ class BaseDistributor(ABC):
         """推送知识条目至当前渠道。
 
         Args:
-            article: 标准知识条目 dict（见 §4 字段定义）。
+            article: 标准知识条目 dict（见 docs/specs/article-format.md §4 字段定义）。
             **kwargs: 子类特定参数。
 
         Returns:

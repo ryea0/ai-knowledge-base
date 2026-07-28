@@ -1,6 +1,6 @@
 ---
 name: check-db-conventions
-description: 检查 DDL / ORM / 查询代码是否符合 AGENTS.md §7 数据库设计规范（必选字段、软删除、唯一约束 guard 列、查询过滤 is_deleted）。在新建表、修改表结构或编写 ORM 查询后使用。
+description: 检查 DDL / ORM / 查询代码是否符合 docs/specs/db-conventions.md §7 数据库设计规范（必选字段、软删除、唯一约束 guard 列、查询过滤 is_deleted）。在新建表、修改表结构或编写 ORM 查询后使用。
 allowed-tools:
   - Read
   - Grep
@@ -18,7 +18,7 @@ allowed-tools:
 
 ## 检查清单
 
-### 1. 必选字段（AGENTS.md §7.1）
+### 1. 必选字段（docs/specs/db-conventions.md §7.1）
 
 每张**业务表**（非纯追加日志表）必须包含以下字段，检查 DDL 和 ORM 是否齐全：
 
@@ -32,14 +32,14 @@ allowed-tools:
 
 **纯追加日志表**（如 `kb_llm_health_log`）例外：仅需 `id` + `created_at`，不需要 `updated_at` / `is_deleted` / `deleted_at`。日志表须在注释中标注 "append-only"。
 
-### 2. 软删除（AGENTS.md §7.1）
+### 2. 软删除（docs/specs/db-conventions.md §7.1）
 
 - **禁止物理删除**：代码中禁止 `session.delete(obj)` 或 `DELETE FROM` 语句（清理过期日志的运维脚本除外，须在 `scripts/` 下）。
 - **删除操作**：须 `UPDATE SET is_deleted=1, deleted_at=NOW(3)`，ORM 层设 `obj.is_deleted = True; obj.deleted_at = datetime.now(UTC)`。
 - **所有查询过滤**：业务查询须加 `WHERE is_deleted = 0`（ORM: `.where(Model.is_deleted == False)`）。
   - **例外**：管理后台查看回收站时可不过滤，但须在代码注释中说明。
 
-### 3. 唯一约束与 guard 列（AGENTS.md §7.1）
+### 3. 唯一约束与 guard 列（docs/specs/db-conventions.md §7.1）
 
 - 业务表的唯一约束须使用 **guard 生成列**排除软删除行。
 - guard 列定义模式：`CASE WHEN is_deleted=0 THEN CONCAT('prefix:', value) ELSE NULL END STORED`。
@@ -48,7 +48,7 @@ allowed-tools:
 
 检查方法：Grep 搜索 DDL 中的 `UNIQUE KEY`，确认是否带 `_guard` 后缀；若直接对业务列建唯一索引，须改为 guard 列。
 
-### 4. 索引规范（AGENTS.md §7.3）
+### 4. 索引规范（docs/specs/db-conventions.md §7.3）
 
 - 每张表须有 `KEY idx_is_deleted (is_deleted)`。
 - 索引命名：普通 `idx_`、唯一 `uk_`、全文 `ft_`。

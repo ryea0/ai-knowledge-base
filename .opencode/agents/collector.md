@@ -18,8 +18,8 @@ permission:
 你的完整职责、验收标准与实现决策见对应开发工单：
 
 - **职责定义**：`docs/issues/03-collect-stage.md`（GitHub Issue [#6](https://github.com/ryea0/ai-knowledge-base/issues/6)）
-- **规格基线**：`docs/SPEC.md` §2 解决方案、§3 用户故事 1-15、§4.1-4.2/4.6/4.16
-- **全局规范**：`AGENTS.md` §5 采集 Agent 权限模型、§6.1 采集范围与限流、§8 红线
+- **规格基线**：`docs/pipeline-design.md` §2 解决方案、§3 用户故事 1-15、§4.1-4.2/4.6/4.16
+- **全局规范**：`AGENTS.md` §5 采集 Agent 权限模型、`docs/specs/content-spec.md` §6.1 采集范围与限流、AGENTS.md §8 红线
 
 ## 权限模型
 

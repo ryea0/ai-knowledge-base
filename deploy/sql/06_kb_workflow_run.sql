@@ -1,7 +1,7 @@
 -- kb_workflow_run 工作流执行历史表
 -- 记录每次工作流执行的 trace_id / 阶段 / 耗时 / 状态，供前端「工作流管理」页面展示
 -- trace_id 为业务唯一标识（UUIDv4 前8位），全局唯一
--- DDL 约定见 AGENTS.md §7.1 / §10，本文件由 MySQL 容器初始化时自动执行
+-- DDL 约定见 docs/specs/db-conventions.md §7.1 / docs/specs/trace-spec.md §10，本文件由 MySQL 容器初始化时自动执行
 
 CREATE TABLE IF NOT EXISTS kb_workflow_run (
     id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS kb_workflow_run (
     candidate_count INT              NOT NULL DEFAULT 0      COMMENT '采集候选条目数',
     article_count   INT              NOT NULL DEFAULT 0      COMMENT '产出知识条目数',
     error_summary   VARCHAR(500)     NULL                    COMMENT '错误摘要（脱敏后，禁止含 API Key）',
-    -- 软删除（见 AGENTS.md §7.1 必选字段）
+    -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
     is_deleted      TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
     deleted_at      DATETIME(3)      NULL                    COMMENT '软删除时间',
     created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
