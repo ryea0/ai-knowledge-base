@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from src.llm.auth_adapter import build_auth_context, build_httpx_headers
@@ -215,15 +215,17 @@ def list_providers(
 
     provider_ids = [r.id for r in responses]
     count_rows = session.execute(
-        select(LlmModel.provider_id, LlmModel.id)
+        select(
+            LlmModel.provider_id,
+            func.count(LlmModel.id).label("cnt"),
+        )
         .where(
             LlmModel.provider_id.in_(provider_ids),
             LlmModel.is_deleted == False,  # noqa: E712
         )
+        .group_by(LlmModel.provider_id)
     ).all()
-    counts: dict[int, int] = {}
-    for pid, _mid in count_rows:
-        counts[pid] = counts.get(pid, 0) + 1
+    counts: dict[int, int] = {pid: cnt for pid, cnt in count_rows}
     for r in responses:
         r.model_count = counts.get(r.id, 0)
 
@@ -646,18 +648,24 @@ def _clear_default_model(
 ) -> None:
     """清除指定供应商下其他模型的 is_default 标记。
 
+    使用单条 ``UPDATE ... SET is_default=0`` 批量清除，
+    避免逐行 Python 更新。
+
     Args:
         session: SQLAlchemy Session。
         provider_id: 供应商 ID。
         exclude_id: 排除的模型 ID（不清除该模型的 default 标记）。
     """
-    stmt = select(LlmModel).where(
-        LlmModel.provider_id == provider_id,
-        LlmModel.is_default == True,  # noqa: E712
-        LlmModel.is_deleted == False,  # noqa: E712
+    stmt = (
+        update(LlmModel)
+        .where(
+            LlmModel.provider_id == provider_id,
+            LlmModel.is_default == True,  # noqa: E712
+            LlmModel.is_deleted == False,  # noqa: E712
+        )
+        .values(is_default=False)
     )
     if exclude_id is not None:
         stmt = stmt.where(LlmModel.id != exclude_id)
 
-    for model in session.execute(stmt).scalars().all():
-        model.is_default = False
+    session.execute(stmt)

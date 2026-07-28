@@ -126,8 +126,8 @@ class TestRecordSuccess:
         assert updated.last_error is None
         assert updated.last_success_at is not None
 
-    def test_already_healthy_no_change(self, session: Session) -> None:
-        """已 healthy 时 CAS 不触发更新。"""
+    def test_already_healthy_updates_success_at(self, session: Session) -> None:
+        """已 healthy 时仍然更新 last_success_at 和 last_latency_ms。"""
         p, m, _ = _setup_provider_model_health(
             session, status=LlmHealthStatus.HEALTHY, failures=0
         )
@@ -135,13 +135,15 @@ class TestRecordSuccess:
             LlmHealth, _get_health_id(session, m.id)
         ).last_success_at
 
-        record_success(session, p.id, m.id)
+        record_success(session, p.id, m.id, latency_ms=42)
 
         updated = session.get(LlmHealth, _get_health_id(session, m.id))
         assert updated is not None
         assert updated.health_status == LlmHealthStatus.HEALTHY
-        # last_success_at 未更新（CAS 跳过）
-        assert updated.last_success_at == old_success_at
+        assert updated.last_success_at is not None
+        assert updated.last_success_at != old_success_at
+        assert updated.last_latency_ms == 42
+        assert updated.consecutive_failures == 0
 
 
 class TestRecordFailure:

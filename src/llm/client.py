@@ -5,6 +5,9 @@
 
 调用成功/失败后须通知 :mod:`src.llm.health` 更新供应商健康状态。
 
+鉴权统一通过 :mod:`src.llm.auth_adapter` 的 :func:`build_auth_context` 构造，
+不再直接调用 :mod:`src.llm.crypto` 解密。
+
 异常分类与重试策略（策略模式）：
     - ``TIMEOUT``        -- 请求超时，可重试，指数退避
     - ``AUTH_FAILED``    -- 鉴权失败，不可重试
@@ -18,14 +21,18 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import litellm
 
+from src.llm.auth_adapter import build_auth_context
 from src.llm.orm import LlmModel, LlmProvider
+from src.llm.utils import sanitize_secrets
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -221,12 +228,19 @@ def chat_completion(
     temperature: float = 0.7,
     max_tokens: int | None = None,
     stream: bool = False,
+    session: Session | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """调用 LLM 生成回复（非流式）。
 
     使用 LiteLLM 统一接口，通过 ``model.litellm_model`` 自动路由到对应供应商。
-    鉴权由 LiteLLM 根据 ``litellm_provider`` 前缀自动处理（bearer 类型传入 api_key）。
+    鉴权由 :func:`build_auth_context` 统一构造，支持 bearer / header / none 类型。
+
+    LiteLLM 内部重试被禁用（``num_retries=0``），重试由外层
+    :func:`chat_completion_with_retry` 按策略模式统一控制，避免双重重试。
+
+    若传入 ``session``，调用成功/失败后会通知 :mod:`src.llm.health`
+    更新模型健康状态。
 
     Args:
         provider: 供应商 ORM 对象（含 base_url / api_key / 超时等配置）。
@@ -235,6 +249,7 @@ def chat_completion(
         temperature: 采样温度，默认 0.7。
         max_tokens: 最大输出 tokens，None 则使用模型默认值。
         stream: 是否流式输出。
+        session: 可选的 SQLAlchemy Session，传入则联动健康状态更新。
         **kwargs: 透传给 LiteLLM ``completion()`` 的额外参数。
 
     Returns:
@@ -243,25 +258,26 @@ def chat_completion(
     Raises:
         LlmCallError: 调用失败（网络 / 鉴权 / 模型不存在等），携带 error_type。
     """
-    # 构造 LiteLLM 调用参数
+    ctx = build_auth_context(provider)
+
     call_kwargs: dict[str, Any] = {
         "model": model.litellm_model,
         "messages": messages,
         "temperature": temperature,
         "stream": stream,
         "timeout": provider.timeout_seconds,
-        "num_retries": provider.max_retries,
+        "num_retries": 0,
         **kwargs,
     }
 
-    # 设置 API Key 和 base_url（非 none 鉴权类型）
-    if provider.api_key_encrypted:
-        from src.llm.crypto import decrypt
-
-        call_kwargs["api_key"] = decrypt(provider.api_key_encrypted)
-
-    if provider.base_url:
-        call_kwargs["api_base"] = provider.base_url
+    if ctx.api_key:
+        call_kwargs["api_key"] = ctx.api_key
+    if ctx.api_base:
+        call_kwargs["api_base"] = ctx.api_base
+    if ctx.extra_headers:
+        call_kwargs["extra_headers"] = ctx.extra_headers
+    if ctx.extra_kwargs:
+        call_kwargs.update(ctx.extra_kwargs)
 
     if max_tokens is not None:
         call_kwargs["max_tokens"] = max_tokens
@@ -273,18 +289,30 @@ def chat_completion(
         len(messages),
     )
 
+    start = time.monotonic()
     try:
         response = litellm.completion(**call_kwargs)
     except Exception as exc:
         error_type = _classify_exception(exc)
-        sanitized = _sanitize_error(str(exc))
+        sanitized = sanitize_secrets(str(exc))
+        latency_ms = int((time.monotonic() - start) * 1000)
         logger.error(
-            "LLM 调用失败: provider=%s model=%s error_type=%s error=%s",
+            "LLM 调用失败: provider=%s model=%s error_type=%s latency=%dms error=%s",
             provider.provider_code,
             model.model_code,
             error_type.value,
+            latency_ms,
             sanitized,
         )
+        if session is not None:
+            from src.llm.health import record_failure
+
+            record_failure(
+                session,
+                provider_id=provider.id,
+                model_id=model.id,
+                error_msg=sanitized,
+            )
         raise LlmCallError(
             sanitized,
             provider_code=provider.provider_code,
@@ -292,11 +320,22 @@ def chat_completion(
             error_type=error_type,
         ) from exc
 
+    latency_ms = int((time.monotonic() - start) * 1000)
     logger.info(
-        "LLM 调用成功: provider=%s model=%s",
+        "LLM 调用成功: provider=%s model=%s latency=%dms",
         provider.provider_code,
         model.model_code,
+        latency_ms,
     )
+    if session is not None:
+        from src.llm.health import record_success
+
+        record_success(
+            session,
+            provider_id=provider.id,
+            model_id=model.id,
+            latency_ms=latency_ms,
+        )
     return dict(response) if not stream else response
 
 
@@ -308,12 +347,16 @@ def chat_completion_with_retry(
     temperature: float = 0.7,
     max_tokens: int | None = None,
     stream: bool = False,
+    session: Session | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """带策略重试的 LLM 调用。
 
     在 :func:`chat_completion` 基础上增加基于 :class:`RetryStrategy` 的重试逻辑。
     重试策略由 :class:`RetryPolicyFactory` 根据异常的 ``error_type`` 自动选择。
+
+    重试上限取 ``min(strategy.max_attempts(), provider.max_retries)``，
+    避免某策略的重试次数超过供应商配置的上限。
 
     Args:
         provider: 供应商 ORM 对象。
@@ -322,6 +365,7 @@ def chat_completion_with_retry(
         temperature: 采样温度。
         max_tokens: 最大输出 tokens。
         stream: 是否流式输出。
+        session: 可选的 SQLAlchemy Session，传入则联动健康状态更新。
         **kwargs: 透传给 LiteLLM 的额外参数。
 
     Returns:
@@ -341,30 +385,35 @@ def chat_completion_with_retry(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=stream,
+                session=session,
                 **kwargs,
             )
         except LlmCallError as exc:
             attempt += 1
             strategy = RetryPolicyFactory.get_strategy(exc.error_type)
+            effective_max = min(strategy.max_attempts(), provider.max_retries)
 
-            if not strategy.should_retry(attempt):
+            if not strategy.should_retry(attempt) or attempt > effective_max:
                 logger.warning(
-                    "LLM 重试终止: provider=%s model=%s error_type=%s attempts=%d",
+                    "LLM 重试终止: provider=%s model=%s error_type=%s "
+                    "attempts=%d max=%d",
                     provider.provider_code,
                     model.model_code,
                     exc.error_type.value,
                     attempt,
+                    effective_max,
                 )
                 raise
 
             backoff = strategy.backoff_seconds(attempt)
             logger.info(
-                "LLM 重试: provider=%s model=%s error_type=%s attempt=%d/%d backoff=%.1fs",
+                "LLM 重试: provider=%s model=%s error_type=%s "
+                "attempt=%d/%d backoff=%.1fs",
                 provider.provider_code,
                 model.model_code,
                 exc.error_type.value,
                 attempt,
-                strategy.max_attempts(),
+                effective_max,
                 backoff,
             )
             time.sleep(backoff)
@@ -441,46 +490,6 @@ def _is_instance(exc: Exception, class_name: str) -> bool:
     return any(cls.__name__ == class_name for cls in type(exc).__mro__)
 
 
-def _sanitize_error(msg: str) -> str:
-    """脱敏错误消息，移除可能包含的 API Key。
-
-    Args:
-        msg: 原始错误消息。
-
-    Returns:
-        脱敏后的错误消息，截断至 500 字符。
-    """
-    sanitized = msg
-    for keyword in ("api_key", "apikey", "authorization", "bearer", "token"):
-        if keyword.lower() in sanitized.lower():
-            sanitized = re.sub(
-                rf"(?i)({keyword})\s*[=:]\s*\S+",
-                r"\1=***REDACTED***",
-                sanitized,
-            )
-    return sanitized[:500]
-
-
-def estimate_cost(
-    model: LlmModel, input_tokens: int, output_tokens: int
-) -> float:
-    """估算单次调用的成本（USD）。
-
-    Args:
-        model: 模型 ORM 对象（含定价信息）。
-        input_tokens: 输入 token 数。
-        output_tokens: 输出 token 数。
-
-    Returns:
-        预估成本（USD），local 模型返回 0.0。
-    """
-    cost = (
-        input_tokens / 1_000_000 * float(model.input_price_per_1m)
-        + output_tokens / 1_000_000 * float(model.output_price_per_1m)
-    )
-    return round(cost, 6)
-
-
 __all__ = [
     "LlmCallError",
     "LlmErrorType",
@@ -493,5 +502,4 @@ __all__ = [
     "TimeoutRetryStrategy",
     "chat_completion",
     "chat_completion_with_retry",
-    "estimate_cost",
 ]

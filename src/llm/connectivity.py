@@ -34,6 +34,7 @@ import httpx
 
 from src.llm.auth_adapter import build_auth_context
 from src.llm.orm import LlmProvider
+from src.llm.utils import sanitize_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -295,21 +296,21 @@ def _execute_get(
 
     except httpx.TimeoutException as exc:
         latency_ms = int((time.monotonic() - start) * 1000)
-        logger.warning("供应商 %s 连通性测试超时: %s", provider_code, exc)
+        logger.warning("供应商 %s 连通性测试超时", provider_code)
         return ConnectivityResult(
             success=False,
             latency_ms=latency_ms,
             status_code=None,
-            error=f"请求超时: {exc}",
+            error=f"请求超时: {sanitize_secrets(str(exc))}",
             endpoint=url,
         )
     except httpx.HTTPError as exc:
-        logger.warning("供应商 %s 连通性测试网络错误: %s", provider_code, exc)
+        logger.warning("供应商 %s 连通性测试网络错误", provider_code)
         return ConnectivityResult(
             success=False,
             latency_ms=None,
             status_code=None,
-            error=f"网络错误: {exc}",
+            error=f"网络错误: {sanitize_secrets(str(exc))}",
             endpoint=url,
         )
 
@@ -326,17 +327,7 @@ def _sanitize_error(text: str, status_code: int) -> str:
     Returns:
         脱敏后的错误信息。
     """
-    import re
-
-    sanitized = text
-    for keyword in ("api_key", "apikey", "authorization", "bearer", "token"):
-        if keyword.lower() in sanitized.lower():
-            sanitized = re.sub(
-                rf"(?i)({keyword})\s*[=:]\s*\S+",
-                r"\1=***REDACTED***",
-                sanitized,
-            )
-    return f"HTTP {status_code}: {sanitized[:500]}"
+    return f"HTTP {status_code}: {sanitize_secrets(text)}"
 
 
 __all__ = [

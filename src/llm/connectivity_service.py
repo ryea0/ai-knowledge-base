@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -23,6 +24,8 @@ from src.llm.orm import LlmProvider, LlmProviderConnectivity
 from src.llm.schemas import ProviderConnectivityResponse, ProviderConnectivityResult
 
 logger = logging.getLogger(__name__)
+
+_MAX_PARALLEL_PROBES = 6
 
 
 def save_connectivity_result(
@@ -68,13 +71,16 @@ def save_connectivity_result(
 def scan_all_providers(session: Session) -> list[ProviderConnectivityResult]:
     """扫描所有未软删除供应商的联通性并持久化。
 
+    使用线程池并行探测各供应商（最多 ``_MAX_PARALLEL_PROBES`` 个并发），
+    探测完成后在主线程统一持久化到 DB，避免多线程共享 Session。
+
     供定时任务和手动批量测试调用。
 
     Args:
         session: SQLAlchemy Session。
 
     Returns:
-        各供应商的连通性结果列表。
+        各供应商的连通性结果列表（按供应商 priority/id 排序）。
     """
     providers = list(
         session.execute(
@@ -84,10 +90,51 @@ def scan_all_providers(session: Session) -> list[ProviderConnectivityResult]:
         ).scalars().all()
     )
 
+    if not providers:
+        return []
+
+    # 并行探测（IO-bound），结果按 provider_id 索引
+    probe_results: dict[int, ConnectivityResult] = {}
+    with ThreadPoolExecutor(max_workers=_MAX_PARALLEL_PROBES) as pool:
+        future_to_provider = {
+            pool.submit(test_connectivity, p): p for p in providers
+        }
+        for future in as_completed(future_to_provider):
+            p = future_to_provider[future]
+            try:
+                probe_results[p.id] = future.result()
+            except Exception:
+                logger.exception(
+                    "供应商 %s (id=%d) 连通性探测异常",
+                    p.provider_code,
+                    p.id,
+                )
+                probe_results[p.id] = ConnectivityResult(
+                    success=False,
+                    latency_ms=None,
+                    status_code=None,
+                    error="探测过程异常",
+                    endpoint="",
+                )
+
+    # 在主线程统一持久化
     results: list[ProviderConnectivityResult] = []
     for p in providers:
-        r = test_connectivity(p)
+        r = probe_results.get(
+            p.id,
+            ConnectivityResult(
+                success=False, latency_ms=None, status_code=None,
+                error="未知错误", endpoint="",
+            ),
+        )
         save_connectivity_result(session, p.id, r)
+        if not r.success:
+            logger.warning(
+                "供应商 %s (id=%d) 联通性测试失败: %s",
+                p.provider_code,
+                p.id,
+                r.error,
+            )
         results.append(
             ProviderConnectivityResult(
                 provider_id=p.id,

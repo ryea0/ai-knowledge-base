@@ -1,8 +1,7 @@
 """src.llm.client 的单元测试。
 
 测试覆盖：
-- _sanitize_error 脱敏逻辑
-- estimate_cost 成本估算
+- sanitize_secrets 脱敏逻辑
 - LlmErrorType 枚举完整性
 - LlmCallError 异常构造与属性
 - _classify_exception 异常映射（各类 LiteLLM 异常 -> LlmErrorType）
@@ -31,113 +30,66 @@ from src.llm.client import (
     ServerErrorRetryStrategy,
     TimeoutRetryStrategy,
     _classify_exception,
-    _sanitize_error,
     chat_completion,
     chat_completion_with_retry,
-    estimate_cost,
 )
+from src.llm.utils import sanitize_secrets
+from src.models.enums import LlmAuthType
 
 
 class TestSanitizeError:
-    """_sanitize_error 脱敏测试。"""
+    """sanitize_secrets 脱敏测试。"""
 
     def test_no_sensitive_data(self) -> None:
         """无敏感数据的消息原样返回。"""
         msg = "Connection timeout to https://api.example.com"
-        assert _sanitize_error(msg) == msg
+        assert sanitize_secrets(msg) == msg
 
     def test_redact_api_key(self) -> None:
         """api_key 被脱敏。"""
         msg = "Error: api_key=sk-abc123 is invalid"
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert "sk-abc123" not in result
         assert "***REDACTED***" in result
 
     def test_redact_apikey(self) -> None:
         """apikey 被脱敏。"""
         msg = "apikey: sk-secret-value"
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert "sk-secret-value" not in result
         assert "***REDACTED***" in result
 
     def test_redact_authorization(self) -> None:
         """authorization 被脱敏。"""
         msg = "authorization=Bearer-abc123"
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert "Bearer-abc123" not in result
         assert "***REDACTED***" in result
 
     def test_redact_bearer(self) -> None:
         """bearer 被脱敏。"""
         msg = "bearer=my-secret-token"
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert "my-secret-token" not in result
         assert "***REDACTED***" in result
 
     def test_redact_token(self) -> None:
         """token 被脱敏。"""
         msg = "token=ghp_abcdef123456"
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert "ghp_abcdef123456" not in result
 
     def test_truncation(self) -> None:
         """超长消息截断至 500 字符。"""
         msg = "x" * 600
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert len(result) <= 500
 
     def test_case_insensitive_redaction(self) -> None:
         """大小写不敏感脱敏。"""
         msg = "API_KEY=sk-secret"
-        result = _sanitize_error(msg)
+        result = sanitize_secrets(msg)
         assert "sk-secret" not in result
-
-
-class TestEstimateCost:
-    """estimate_cost 成本估算测试。"""
-
-    def test_zero_tokens(self) -> None:
-        """0 tokens 返回 0.0。"""
-        model = MagicMock()
-        model.input_price_per_1m = 0.0
-        model.output_price_per_1m = 0.0
-        assert estimate_cost(model, 0, 0) == 0.0
-
-    def test_input_only(self) -> None:
-        """仅输入 token 的成本。"""
-        model = MagicMock()
-        model.input_price_per_1m = 1.0
-        model.output_price_per_1m = 0.0
-        assert estimate_cost(model, 1_000_000, 0) == 1.0
-
-    def test_output_only(self) -> None:
-        """仅输出 token 的成本。"""
-        model = MagicMock()
-        model.input_price_per_1m = 0.0
-        model.output_price_per_1m = 2.0
-        assert estimate_cost(model, 0, 500_000) == 1.0
-
-    def test_combined(self) -> None:
-        """输入+输出组合成本。"""
-        model = MagicMock()
-        model.input_price_per_1m = 1.0
-        model.output_price_per_1m = 3.0
-        assert estimate_cost(model, 1_000_000, 500_000) == 2.5
-
-    def test_local_model_zero_cost(self) -> None:
-        """local 模型（价格为 0）返回 0.0。"""
-        model = MagicMock()
-        model.input_price_per_1m = 0.0
-        model.output_price_per_1m = 0.0
-        assert estimate_cost(model, 100_000, 50_000) == 0.0
-
-    def test_rounding(self) -> None:
-        """结果四舍五入至 6 位小数。"""
-        model = MagicMock()
-        model.input_price_per_1m = 0.5
-        model.output_price_per_1m = 1.5
-        result = estimate_cost(model, 1, 0)
-        assert result == round(0.5 / 1_000_000, 6)
 
 
 class TestLlmErrorType:
@@ -466,9 +418,11 @@ def _make_provider_mock() -> MagicMock:
     provider = MagicMock()
     provider.provider_code = "deepseek"
     provider.timeout_seconds = 30
-    provider.max_retries = 1
+    provider.max_retries = 3
     provider.api_key_encrypted = None
     provider.base_url = "https://api.deepseek.com/v1"
+    provider.auth_type = LlmAuthType.NONE
+    provider.id = 1
     return provider
 
 
@@ -477,6 +431,7 @@ def _make_model_mock() -> MagicMock:
     model = MagicMock()
     model.model_code = "deepseek-chat"
     model.litellm_model = "deepseek/deepseek-chat"
+    model.id = 1
     return model
 
 
