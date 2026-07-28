@@ -1,3 +1,5 @@
+import { ref } from 'vue'
+
 export function usePagination(defaultSize = 20) {
   const page = ref(1)
   const size = ref(defaultSize)

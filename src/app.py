@@ -22,12 +22,15 @@ Usage::
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from src.api.llm_routes import router as llm_router
 from src.common.exception_handler import GlobalExceptionHandler
 from src.common.health import (
     AppInfo,
@@ -40,8 +43,17 @@ from src.common.json_config import CustomJSONResponse
 from src.common.middleware import RequestLogMiddleware
 from src.config.database import get_db
 from src.config.logging_config import setup_logging
+from src.llm.scheduler import start_connectivity_scheduler, stop_connectivity_scheduler
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """应用生命周期：启动/停止定时任务。"""
+    start_connectivity_scheduler()
+    yield
+    stop_connectivity_scheduler()
 
 
 def create_app() -> FastAPI:
@@ -57,6 +69,7 @@ def create_app() -> FastAPI:
         description="自动采集 AI/LLM/Agent 领域技术动态的知识库系统",
         version="0.1.0",
         default_response_class=CustomJSONResponse,
+        lifespan=lifespan,
     )
 
     app.add_middleware(RequestLogMiddleware)
@@ -64,6 +77,8 @@ def create_app() -> FastAPI:
     GlobalExceptionHandler.register(app)
 
     _register_health_routes(app)
+
+    app.include_router(llm_router)
 
     logger.info("FastAPI 应用创建完成")
     return app

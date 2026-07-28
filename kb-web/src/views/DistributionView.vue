@@ -10,7 +10,7 @@ const channels = ref([
 ])
 
 // 分发历史
-const distributions = ref<unknown[]>([])
+const distributions = ref<Record<string, unknown>[]>([])
 
 async function loadChannels(): Promise<void> {
   // TODO: GET /distributors/channels

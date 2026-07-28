@@ -25,18 +25,23 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.llm.auth_adapter import build_auth_context, build_httpx_headers
+from src.llm.connectivity import build_openai_models_url
+from src.llm.connectivity_service import get_connectivity_map
 from src.llm.crypto import encrypt
-from src.llm.orm import LlmModel, LlmProvider
+from src.llm.orm import LlmHealth, LlmModel, LlmProvider, LlmProviderConnectivity
 from src.llm.schemas import (
     DiscoveredModel,
+    HealthResponse,
     ModelCreate,
     ModelResponse,
     ModelUpdate,
     ProviderCreate,
+    ProviderDetailResponse,
     ProviderResponse,
     ProviderUpdate,
 )
-from src.models.enums import LlmAuthType, LlmModelSource
+from src.models.enums import LlmAuthType, LlmHealthStatus, LlmModelSource, LlmProviderType
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,7 @@ def create_provider(
 ) -> ProviderResponse:
     """创建供应商。
 
+    校验 ``provider_code`` 唯一性（未软删除范围内）。
     若 ``auth_type`` 非 none 且 ``data.api_key`` 不为空，则加密存储。
     事务由调用方管理（``session_scope`` 或 ``get_db``），本函数仅 ``flush``。
 
@@ -74,8 +80,13 @@ def create_provider(
         raise ValueError(f"供应商代码 {data.provider_code} 已存在")
 
     encrypted_key: str | None = None
+    encrypted_secret: str | None = None
+
     if data.auth_type != LlmAuthType.NONE and data.api_key:
         encrypted_key = encrypt(data.api_key)
+
+    if data.auth_type == LlmAuthType.OAUTH and data.secret_key:
+        encrypted_secret = encrypt(data.secret_key)
 
     provider = LlmProvider(
         provider_code=data.provider_code,
@@ -85,14 +96,14 @@ def create_provider(
         litellm_provider=data.litellm_provider,
         auth_type=data.auth_type,
         api_key_encrypted=encrypted_key,
-        auth_config=data.auth_config,
+        secret_key_encrypted=encrypted_secret,
+        header_name=data.header_name if data.auth_type == LlmAuthType.HEADER else None,
+        token_url=data.token_url if data.auth_type == LlmAuthType.OAUTH else None,
         is_enabled=data.is_enabled,
         priority=data.priority,
         timeout_seconds=data.timeout_seconds,
         max_retries=data.max_retries,
         rpm_limit=data.rpm_limit,
-        health_check_enabled=data.health_check_enabled,
-        failure_threshold=data.failure_threshold,
     )
     session.add(provider)
     session.flush()
@@ -114,15 +125,113 @@ def get_provider(session: Session, provider_id: int) -> ProviderResponse | None:
     return ProviderResponse.model_validate(provider)
 
 
-def list_providers(session: Session) -> list[ProviderResponse]:
-    """查询所有供应商（不含软删除），按优先级排序。"""
-    stmt = (
-        select(LlmProvider)
-        .where(LlmProvider.is_deleted == False)  # noqa: E712
-        .order_by(LlmProvider.priority, LlmProvider.id)
+def get_provider_detail(
+    session: Session, provider_id: int
+) -> ProviderDetailResponse | None:
+    """查询供应商详情（含关联模型列表和健康状态）。
+
+    Args:
+        session: SQLAlchemy Session。
+        provider_id: 供应商 ID。
+
+    Returns:
+        供应商详情（含 models + health_list），不存在则返回 None。
+    """
+    provider = session.execute(
+        select(LlmProvider).where(
+            LlmProvider.id == provider_id,
+            LlmProvider.is_deleted == False,  # noqa: E712
+        )
+    ).scalars().first()
+    if provider is None:
+        return None
+
+    models = list(
+        session.execute(
+            select(LlmModel)
+            .where(
+                LlmModel.provider_id == provider_id,
+                LlmModel.is_deleted == False,  # noqa: E712
+            )
+            .order_by(LlmModel.is_default.desc(), LlmModel.id)
+        ).scalars().all()
     )
+
+    health_list = list(
+        session.execute(
+            select(LlmHealth)
+            .where(
+                LlmHealth.provider_id == provider_id,
+                LlmHealth.is_deleted == False,  # noqa: E712
+            )
+            .order_by(LlmHealth.model_id)
+        ).scalars().all()
+    )
+
+    conn_map = get_connectivity_map(session, [provider_id])
+    response = ProviderDetailResponse(
+        **ProviderResponse.model_validate(provider).model_dump(),
+        models=[ModelResponse.model_validate(m) for m in models],
+        health_list=[HealthResponse.model_validate(h) for h in health_list],
+    )
+    response.connectivity = conn_map.get(provider_id)
+    return response
+
+
+def list_providers(
+    session: Session,
+    *,
+    provider_type: LlmProviderType | None = None,
+    is_enabled: bool | None = None,
+) -> list[ProviderResponse]:
+    """查询供应商列表（不含软删除），按优先级排序。
+
+    同时填充 ``model_count``（未软删除模型数）。
+
+    Args:
+        session: SQLAlchemy Session。
+        provider_type: 按供应商类型筛选（cloud / local），None 不筛选。
+        is_enabled: 按启用状态筛选，None 不筛选。
+
+    Returns:
+        供应商响应列表。
+    """
+    stmt = select(LlmProvider).where(
+        LlmProvider.is_deleted == False  # noqa: E712
+    )
+
+    if provider_type is not None:
+        stmt = stmt.where(LlmProvider.provider_type == provider_type)
+
+    if is_enabled is not None:
+        stmt = stmt.where(LlmProvider.is_enabled == is_enabled)
+
+    stmt = stmt.order_by(LlmProvider.priority, LlmProvider.id)
+
     providers = list(session.execute(stmt).scalars().all())
-    return [ProviderResponse.model_validate(p) for p in providers]
+    responses = [ProviderResponse.model_validate(p) for p in providers]
+    if not responses:
+        return responses
+
+    provider_ids = [r.id for r in responses]
+    count_rows = session.execute(
+        select(LlmModel.provider_id, LlmModel.id)
+        .where(
+            LlmModel.provider_id.in_(provider_ids),
+            LlmModel.is_deleted == False,  # noqa: E712
+        )
+    ).all()
+    counts: dict[int, int] = {}
+    for pid, _mid in count_rows:
+        counts[pid] = counts.get(pid, 0) + 1
+    for r in responses:
+        r.model_count = counts.get(r.id, 0)
+
+    # 填充联通性状态（从 DB 读取，非实时探测）
+    conn_map = get_connectivity_map(session, provider_ids)
+    for r in responses:
+        r.connectivity = conn_map.get(r.id)
+    return responses
 
 
 def update_provider(
@@ -154,10 +263,14 @@ def update_provider(
 
     update_fields = data.model_dump(exclude_unset=True, exclude_none=True)
 
-    # 单独处理 api_key：非 None 则加密存储
+    # 单独处理凭证字段：非 None 则加密存储
     api_key = update_fields.pop("api_key", None)
     if api_key is not None:
         provider.api_key_encrypted = encrypt(api_key)
+
+    secret_key = update_fields.pop("secret_key", None)
+    if secret_key is not None:
+        provider.secret_key_encrypted = encrypt(secret_key)
 
     for field, value in update_fields.items():
         setattr(provider, field, value)
@@ -194,6 +307,18 @@ def delete_provider(session: Session, provider_id: int) -> None:
     provider.deleted_at = datetime.now(UTC).replace(tzinfo=None)
     provider.is_enabled = False
     session.flush()
+
+    # 同步软删除供应商联通性行
+    conn = session.execute(
+        select(LlmProviderConnectivity).where(
+            LlmProviderConnectivity.provider_id == provider_id,
+            LlmProviderConnectivity.is_deleted == False,  # noqa: E712
+        )
+    ).scalars().first()
+    if conn is not None:
+        conn.is_deleted = True
+        conn.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+        session.flush()
 
     logger.info("软删除供应商: %s (id=%d)", provider.provider_code, provider.id)
 
@@ -245,6 +370,7 @@ def create_model(
     # 若设为默认，先清除同供应商其他默认模型
     if data.is_default:
         _clear_default_model(session, provider_id)
+        session.flush()
 
     model = LlmModel(
         provider_id=provider_id,
@@ -264,6 +390,15 @@ def create_model(
         source=LlmModelSource.MANUAL,
     )
     session.add(model)
+    session.flush()
+
+    # 自动创建模型健康状态行（health_status=unknown）
+    health = LlmHealth(
+        provider_id=provider_id,
+        model_id=model.id,
+        health_status=LlmHealthStatus.UNKNOWN,
+    )
+    session.add(health)
     session.flush()
 
     logger.info(
@@ -319,6 +454,7 @@ def update_model(
 
     if update_fields.get("is_default"):
         _clear_default_model(session, model.provider_id, exclude_id=model_id)
+        session.flush()
 
     for field, value in update_fields.items():
         setattr(model, field, value)
@@ -355,6 +491,18 @@ def delete_model(session: Session, model_id: int) -> None:
     model.deleted_at = datetime.now(UTC).replace(tzinfo=None)
     model.is_enabled = False
     session.flush()
+
+    # 同步软删除对应的健康状态行
+    health = session.execute(
+        select(LlmHealth).where(
+            LlmHealth.model_id == model_id,
+            LlmHealth.is_deleted == False,  # noqa: E712
+        )
+    ).scalars().first()
+    if health is not None:
+        health.is_deleted = True
+        health.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+        session.flush()
 
     logger.info("软删除模型: id=%d", model_id)
 
@@ -395,24 +543,14 @@ def discover_models(
     if provider is None:
         raise ValueError(f"供应商 {provider_id} 不存在")
 
-    # Step 1: 调用 /v1/models
-    headers: dict[str, str] = {"Accept": "application/json"}
+    # Step 1: 按 litellm_provider 分派到不同端点
+    ctx = build_auth_context(provider)
+    headers = build_httpx_headers(ctx)
 
-    if provider.api_key_encrypted:
-        from src.llm.crypto import decrypt
-
-        api_key = decrypt(provider.api_key_encrypted)
-        if provider.auth_type == LlmAuthType.HEADER:
-            header_name = (
-                provider.auth_config.get("header_name", "x-api-key")
-                if provider.auth_config
-                else "x-api-key"
-            )
-            headers[header_name] = api_key
-        else:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-    url = provider.base_url.rstrip("/") + "/models"
+    if provider.litellm_provider == "ollama":
+        url = provider.base_url.rstrip("/") + "/api/tags"
+    else:
+        url = build_openai_models_url(provider.base_url)
 
     try:
         resp = httpx.get(url, headers=headers, timeout=provider.timeout_seconds)
@@ -423,7 +561,14 @@ def discover_models(
             f"无法获取供应商 {provider.provider_code} 的模型列表: {exc}"
         ) from exc
 
-    raw_models: list[dict[str, Any]] = resp.json().get("data", [])
+    body = resp.json()
+    if provider.litellm_provider == "ollama":
+        raw_models = [
+            {"id": m.get("model", m.get("name", ""))}
+            for m in body.get("models", [])
+        ]
+    else:
+        raw_models = body.get("data", [])
 
     # Step 2: 查 DB 已有 model_code（不含软删除）
     existing_codes: set[str] = set(

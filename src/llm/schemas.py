@@ -6,8 +6,6 @@ ORM -> Schema 转换在 :mod:`src.llm.service` 中完成。
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.common.json_config import JsonDateTime
@@ -36,16 +34,11 @@ class ProviderBase(BaseModel):
     auth_type: LlmAuthType = Field(
         default=LlmAuthType.BEARER, description="鉴权方式 bearer/oauth/header/none"
     )
-    auth_config: dict[str, Any] | None = Field(
-        None, description="鉴权附加配置，结构由 auth_type 决定"
-    )
     is_enabled: bool = Field(True, description="是否启用")
     priority: int = Field(100, ge=0, description="路由优先级，数值越小越高")
     timeout_seconds: int = Field(30, ge=1, le=600, description="请求超时秒数")
-    max_retries: int = Field(3, ge=0, le=10, description="最大重试次数")
+    max_retries: int = Field(3, ge=0, le=10, description="最大重试次数上限")
     rpm_limit: int = Field(0, ge=0, description="每分钟请求上限，0=不限速")
-    health_check_enabled: bool = Field(True, description="是否启用健康检查")
-    failure_threshold: int = Field(5, ge=1, le=100, description="连续失败转 unhealthy 阈值")
 
 
 class ProviderCreate(ProviderBase):
@@ -53,6 +46,15 @@ class ProviderCreate(ProviderBase):
 
     api_key: str | None = Field(
         None, description="明文 API Key（创建时传入，服务端加密存储，不返回）"
+    )
+    secret_key: str | None = Field(
+        None, description="明文 Secret Key（仅 oauth 类型，服务端加密存储）"
+    )
+    header_name: str | None = Field(
+        None, max_length=100, description="自定义鉴权 header 名（仅 header 类型）"
+    )
+    token_url: str | None = Field(
+        None, max_length=255, description="OAuth token 交换地址（仅 oauth 类型）"
     )
 
 
@@ -68,14 +70,28 @@ class ProviderUpdate(BaseModel):
     api_key: str | None = Field(
         None, description="明文 API Key，传入则更新加密凭证，None 表示不修改"
     )
-    auth_config: dict[str, Any] | None = None
+    secret_key: str | None = Field(
+        None, description="明文 Secret Key，传入则更新加密凭证"
+    )
+    header_name: str | None = Field(None, max_length=100)
+    token_url: str | None = Field(None, max_length=255)
     is_enabled: bool | None = None
     priority: int | None = Field(None, ge=0)
     timeout_seconds: int | None = Field(None, ge=1, le=600)
     max_retries: int | None = Field(None, ge=0, le=10)
     rpm_limit: int | None = Field(None, ge=0)
-    health_check_enabled: bool | None = None
-    failure_threshold: int | None = Field(None, ge=1, le=100)
+
+
+class ProviderConnectivityResponse(BaseModel):
+    """供应商联通性状态（从 DB 读取）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    provider_id: int
+    is_connected: bool
+    latency_ms: int | None = None
+    last_check_at: JsonDateTime | None = None
+    last_error: str | None = None
 
 
 class ProviderResponse(BaseModel):
@@ -90,24 +106,42 @@ class ProviderResponse(BaseModel):
     base_url: str
     litellm_provider: str
     auth_type: LlmAuthType
-    auth_config: dict[str, Any] | None
+    header_name: str | None
+    token_url: str | None
     is_enabled: bool
     priority: int
     timeout_seconds: int
     max_retries: int
     rpm_limit: int
-    health_status: LlmHealthStatus
-    health_check_enabled: bool
-    last_check_at: JsonDateTime | None
-    last_success_at: JsonDateTime | None
-    last_failure_at: JsonDateTime | None
-    consecutive_failures: int
-    failure_threshold: int
-    last_error: str | None
+    model_count: int = Field(0, description="该供应商下未软删除的模型数量")
+    connectivity: ProviderConnectivityResponse | None = Field(
+        None, description="供应商联通性状态（从 DB 读取）"
+    )
     is_deleted: bool
     deleted_at: JsonDateTime | None
     created_at: JsonDateTime
     updated_at: JsonDateTime
+
+
+class ProviderDetailResponse(ProviderResponse):
+    """供应商详情响应（含关联模型列表和健康状态）。"""
+
+    models: list[ModelResponse] = Field(
+        default_factory=list, description="该供应商下的模型列表"
+    )
+    health_list: list[HealthResponse] = Field(
+        default_factory=list, description="该供应商下各模型的健康状态"
+    )
+
+
+class ProviderConnectivityResult(BaseModel):
+    """供应商连通性批量测试单条结果。"""
+
+    provider_id: int
+    success: bool
+    latency_ms: int | None = None
+    error: str | None = None
+    last_check_at: JsonDateTime | None = None
 
 
 class ModelBase(BaseModel):
@@ -200,15 +234,24 @@ class DiscoveredModel(BaseModel):
     )
 
 
-class HealthLogResponse(BaseModel):
-    """健康检查日志响应。"""
+class HealthResponse(BaseModel):
+    """模型健康状态响应。"""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     provider_id: int
-    model_id: int | None
-    check_at: JsonDateTime
-    latency_ms: int | None
-    is_success: bool
-    error_msg: str | None
+    model_id: int
+    health_status: LlmHealthStatus
+    consecutive_failures: int
+    failure_threshold: int
+    health_check_enabled: bool
+    last_check_at: JsonDateTime | None
+    last_success_at: JsonDateTime | None
+    last_failure_at: JsonDateTime | None
+    last_latency_ms: int | None
+    last_error: str | None
+    is_deleted: bool
+    deleted_at: JsonDateTime | None
+    created_at: JsonDateTime
+    updated_at: JsonDateTime

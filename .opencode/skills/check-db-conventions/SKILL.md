@@ -30,7 +30,7 @@ allowed-tools:
 | `is_deleted` | `TINYINT(1) UNSIGNED NOT NULL DEFAULT 0` | `Integer, nullable=False, default=False` | 默认 0 |
 | `deleted_at` | `DATETIME(3) NULL` | `DateTime, nullable=True` | — |
 
-**纯追加日志表**（如 `kb_llm_health_log`）例外：仅需 `id` + `created_at`，不需要 `updated_at` / `is_deleted` / `deleted_at`。日志表须在注释中标注 "append-only"。
+**纯追加日志表**（如 `kb_llm_call_log`）例外：仅需 `id` + `created_at`，不需要 `updated_at` / `is_deleted` / `deleted_at`。日志表须在注释中标注 "append-only"。
 
 ### 2. 软删除（docs/specs/db-conventions.md §7.1）
 
@@ -85,6 +85,6 @@ allowed-tools:
 
 ### PASS
 
-- [deploy/sql/03_kb_llm_health_log.sql] 纯追加日志表，仅需 id + created_at ✓
+- [deploy/sql/08_kb_llm_call_log.sql] 纯追加日志表，仅需 id + created_at ✓
 - [src/llm/orm.py] 所有 ORM 模型字段与 DDL 一致 ✓
 ```

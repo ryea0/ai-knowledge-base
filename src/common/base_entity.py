@@ -10,7 +10,7 @@
     - ``is_deleted``: 软删除标记，``0`` = 未删除，``1`` = 已删除
     - ``deleted_at``: 软删除时间，删除时填充
 
-纯追加日志表（如 ``kb_llm_health_log``）不继承 ``BaseEntity``，
+纯追加日志表（如 ``kb_llm_call_log``）不继承 ``BaseEntity``，
 直接继承 :class:`Base` 并自行定义 ``id`` + ``created_at``。
 
 命名说明：

@@ -1,6 +1,6 @@
-"""LLM 供应商健康检查服务。
+"""LLM 模型健康状态管理服务。
 
-实现类熔断器状态机：
+实现模型级类熔断器状态机：
     healthy -> degraded -> unhealthy
 
 状态转换规则（CAS 乐观锁，见 docs/specs/llm-provider.md §9.2）：
@@ -8,9 +8,12 @@
     - 调用失败：``consecutive_failures`` 递增
         - 达到 ``failure_threshold``：转 ``unhealthy``
         - 未达阈值：转 ``degraded``
-    - unhealthy 供应商被路由跳过，需定时健康检查恢复
+    - unhealthy 模型被路由跳过，需定时健康检查恢复
 
-所有状态更新使用 CAS（``WHERE id=? AND health_status=?``）保证并发安全。
+健康状态存储于 ``kb_llm_health`` 表（模型级，upsert 语义），
+每个模型至多一行。
+
+所有状态更新使用 CAS（``WHERE model_id=? AND health_status=?``）保证并发安全。
 
 事务约定：
     本模块所有函数**不调用** ``session.commit()``，仅执行 ``session.flush()``
@@ -23,14 +26,14 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from src.llm.orm import LlmHealthLog, LlmProvider
+from src.llm.orm import LlmHealth
 from src.models.enums import LlmHealthStatus
 
 if TYPE_CHECKING:
-    from src.llm.orm import LlmModel
+    from src.llm.orm import LlmModel, LlmProvider
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +41,11 @@ logger = logging.getLogger(__name__)
 def record_success(
     session: Session,
     provider_id: int,
+    model_id: int,
     *,
-    model_id: int | None = None,
     latency_ms: int | None = None,
 ) -> None:
-    """记录一次成功的 LLM 调用，更新供应商健康状态为 healthy。
+    """记录一次成功的 LLM 调用，更新模型健康状态为 healthy。
 
     使用 CAS 更新：仅当当前状态为非 healthy 时才转换（避免无谓写）。
     ``consecutive_failures`` 归零，``last_success_at`` 更新。
@@ -51,40 +54,42 @@ def record_success(
     Args:
         session: SQLAlchemy Session。
         provider_id: 供应商 ID。
-        model_id: 被调用的模型 ID（可选，用于日志）。
-        latency_ms: 响应延迟毫秒（可选，用于日志）。
+        model_id: 被调用的模型 ID。
+        latency_ms: 响应延迟毫秒（可选）。
     """
     now = datetime.now(UTC).replace(tzinfo=None)
 
+    values: dict[str, object] = {
+        "consecutive_failures": 0,
+        "last_success_at": now,
+        "last_error": None,
+    }
+    if latency_ms is not None:
+        values["last_latency_ms"] = latency_ms
+
     # CAS 更新：非 healthy 状态 -> healthy（排除软删除）
     session.execute(
-        update(LlmProvider)
+        update(LlmHealth)
         .where(
-            LlmProvider.id == provider_id,
-            LlmProvider.is_deleted == False,  # noqa: E712
-            LlmProvider.health_status != LlmHealthStatus.HEALTHY,
+            LlmHealth.model_id == model_id,
+            LlmHealth.is_deleted == False,  # noqa: E712
+            LlmHealth.health_status != LlmHealthStatus.HEALTHY,
         )
-        .values(
-            health_status=LlmHealthStatus.HEALTHY,
-            consecutive_failures=0,
-            last_success_at=now,
-            last_error=None,
-        )
+        .values(health_status=LlmHealthStatus.HEALTHY, **values)
     )
     session.flush()
 
     logger.debug(
-        "供应商 %d 健康状态更新为 healthy",
-        provider_id,
+        "模型 %d 健康状态更新为 healthy",
+        model_id,
     )
 
 
 def record_failure(
     session: Session,
     provider_id: int,
+    model_id: int,
     error_msg: str,
-    *,
-    model_id: int | None = None,
 ) -> None:
     """记录一次失败的 LLM 调用，递增失败计数并可能转换状态。
 
@@ -98,37 +103,35 @@ def record_failure(
     Args:
         session: SQLAlchemy Session。
         provider_id: 供应商 ID。
+        model_id: 被调用的模型 ID。
         error_msg: 错误信息（须脱敏，禁止含 API Key）。
-        model_id: 被调用的模型 ID（可选）。
     """
     now = datetime.now(UTC).replace(tzinfo=None)
     sanitized = error_msg[:500]
 
-    # 先读取当前 provider 获取 failure_threshold（排除软删除）
-    from sqlalchemy import select as sa_select
-
-    provider = session.execute(
-        sa_select(LlmProvider).where(
-            LlmProvider.id == provider_id,
-            LlmProvider.is_deleted == False,  # noqa: E712
+    # 读取当前 health 行获取 failure_threshold（排除软删除）
+    health = session.execute(
+        select(LlmHealth).where(
+            LlmHealth.model_id == model_id,
+            LlmHealth.is_deleted == False,  # noqa: E712
         )
     ).scalars().first()
-    if provider is None:
-        logger.error("供应商 %d 不存在或已删除，无法记录失败", provider_id)
+    if health is None:
+        logger.error("模型 %d 无健康状态行，无法记录失败", model_id)
         return
 
-    new_failures = provider.consecutive_failures + 1
+    new_failures = health.consecutive_failures + 1
     new_status = (
         LlmHealthStatus.UNHEALTHY
-        if new_failures >= provider.failure_threshold
+        if new_failures >= health.failure_threshold
         else LlmHealthStatus.DEGRADED
     )
 
     session.execute(
-        update(LlmProvider)
+        update(LlmHealth)
         .where(
-            LlmProvider.id == provider_id,
-            LlmProvider.is_deleted == False,  # noqa: E712
+            LlmHealth.model_id == model_id,
+            LlmHealth.is_deleted == False,  # noqa: E712
         )
         .values(
             health_status=new_status,
@@ -140,139 +143,103 @@ def record_failure(
     session.flush()
 
     logger.warning(
-        "供应商 %d 健康状态更新为 %s，连续失败 %d/%d",
-        provider_id,
+        "模型 %d 健康状态更新为 %s，连续失败 %d/%d",
+        model_id,
         new_status.to_json_str(),
         new_failures,
-        provider.failure_threshold,
+        health.failure_threshold,
     )
 
 
-def check_provider_health(
+def check_model_health(
     session: Session,
     provider: LlmProvider,
-    model: LlmModel | None = None,
+    model: LlmModel,
 ) -> bool:
-    """执行一次健康检查并记录日志。
+    """执行一次模型级健康检查并更新状态。
 
-    检查方式：
-        - 有 model：发送一条简短消息（``ping``）测试端到端可用性。
-        - 无 model：调用 ``GET {base_url}/models`` 测试连通性。
-
-    检查结果写入 ``kb_llm_health_log`` 表并更新 provider 当前状态。
+    检查方式：调用 :func:`src.llm.connectivity.test_connectivity` 测试供应商连通性，
+    按 ``litellm_provider`` 分派到不同探测端点（OpenAI / Anthropic / Ollama）。
+    检查结果更新 ``kb_llm_health`` 表中该模型的当前状态。
     事务由调用方管理，本函数仅 ``flush``。
 
     Args:
         session: SQLAlchemy Session。
         provider: 供应商 ORM 对象。
-        model: 可选的模型 ORM 对象，传入则做模型级检查。
+        model: 模型 ORM 对象。
 
     Returns:
         True 表示健康检查成功，False 表示失败。
     """
-    if not provider.health_check_enabled:
-        logger.debug("供应商 %s 健康检查已禁用，跳过", provider.provider_code)
+    # 检查该模型的 health 行是否存在且启用健康检查
+    health = session.execute(
+        select(LlmHealth).where(
+            LlmHealth.model_id == model.id,
+            LlmHealth.is_deleted == False,  # noqa: E712
+        )
+    ).scalars().first()
+    if health is None:
+        logger.warning("模型 %d 无健康状态行，跳过检查", model.id)
         return True
 
-    import time
+    if not health.health_check_enabled:
+        logger.debug("模型 %d 健康检查已禁用，跳过", model.id)
+        return True
 
-    import httpx
+    from src.llm.connectivity import test_connectivity
 
     now = datetime.now(UTC).replace(tzinfo=None)
-    start = time.monotonic()
-    is_success = False
-    latency_ms: int | None = None
-    error_msg: str | None = None
+    result = test_connectivity(provider)
 
-    try:
-        # 构造健康检查请求
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-
-        from src.llm.crypto import decrypt
-
-        if provider.api_key_encrypted:
-            api_key = decrypt(provider.api_key_encrypted)
-            if provider.auth_type.value == 2:  # HEADER
-                header_name = (
-                    provider.auth_config.get("header_name", "x-api-key")
-                    if provider.auth_config
-                    else "x-api-key"
-                )
-                headers[header_name] = api_key
-            else:
-                headers["Authorization"] = f"Bearer {api_key}"
-
-        # GET {base_url}/models
-        url = provider.base_url.rstrip("/") + "/models"
-        resp = httpx.get(
-            url, headers=headers, timeout=provider.timeout_seconds
-        )
-        resp.raise_for_status()
-
-        latency_ms = int((time.monotonic() - start) * 1000)
-        is_success = True
-
-    except Exception as exc:
-        latency_ms = None
-        error_msg = str(exc)[:500]
-        is_success = False
-        logger.warning(
-            "供应商 %s 健康检查失败: %s",
-            provider.provider_code,
-            error_msg,
-        )
-
-    # 写健康日志
-    log_entry = LlmHealthLog(
-        provider_id=provider.id,
-        model_id=model.id if model else None,
-        check_at=now,
-        latency_ms=latency_ms,
-        is_success=is_success,
-        error_msg=error_msg,
-    )
-    session.add(log_entry)
-
-    # 更新 provider 当前状态（排除软删除）
+    # 更新 kb_llm_health 当前状态
+    new_failures = 0 if result.success else health.consecutive_failures + 1
     session.execute(
-        update(LlmProvider)
+        update(LlmHealth)
         .where(
-            LlmProvider.id == provider.id,
-            LlmProvider.is_deleted == False,  # noqa: E712
+            LlmHealth.model_id == model.id,
+            LlmHealth.is_deleted == False,  # noqa: E712
         )
         .values(
             last_check_at=now,
+            last_latency_ms=result.latency_ms,
             health_status=(
                 LlmHealthStatus.HEALTHY
-                if is_success
+                if result.success
                 else LlmHealthStatus.DEGRADED
             ),
-            consecutive_failures=0 if is_success else provider.consecutive_failures + 1,
-            last_success_at=now if is_success else provider.last_success_at,
-            last_failure_at=now if not is_success else provider.last_failure_at,
-            last_error=None if is_success else error_msg,
+            consecutive_failures=new_failures,
+            last_success_at=now if result.success else health.last_success_at,
+            last_failure_at=now if not result.success else health.last_failure_at,
+            last_error=None if result.success else result.error,
         )
     )
     session.flush()
 
-    return is_success
+    if not result.success:
+        logger.warning(
+            "模型 %d 健康检查失败: %s",
+            model.id,
+            result.error,
+        )
+
+    return result.success
 
 
-def reset_health(session: Session, provider_id: int) -> None:
-    """重置供应商健康状态为 unknown。
+def reset_health(session: Session, model_id: int) -> None:
+    """重置模型健康状态为 unknown。
 
-    用于管理后台手动重置，让被熔断的供应商重新进入检测。
+    用于管理后台手动重置，让被熔断的模型重新进入检测。
     事务由调用方管理，本函数仅 ``flush``。
 
     Args:
         session: SQLAlchemy Session。
-        provider_id: 供应商 ID。
+        model_id: 模型 ID。
     """
     session.execute(
-        update(LlmProvider)
+        update(LlmHealth)
         .where(
-            LlmProvider.id == provider_id,
-            LlmProvider.is_deleted == False,  # noqa: E712
+            LlmHealth.model_id == model_id,
+            LlmHealth.is_deleted == False,  # noqa: E712
         )
         .values(
             health_status=LlmHealthStatus.UNKNOWN,
@@ -282,4 +249,4 @@ def reset_health(session: Session, provider_id: int) -> None:
     )
     session.flush()
 
-    logger.info("供应商 %d 健康状态已重置为 unknown", provider_id)
+    logger.info("模型 %d 健康状态已重置为 unknown", model_id)

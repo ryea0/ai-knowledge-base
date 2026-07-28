@@ -14,7 +14,7 @@
 | **表名** | 全小写 `snake_case`，禁止使用驼峰、拼音、数据库保留字；须加业务前缀（如 `kb_article`）。 |
 | **字段名** | 全小写 `snake_case`，禁止使用数据库保留字（`desc`/`order`/`type` 等，须加业务前缀如 `article_type`）。 |
 | **主键** | 每张表必须有主键，推荐使用 `BIGINT UNSIGNED AUTO_INCREMENT` 或分布式 ID。**禁止**使用 `UUID` 作为聚簇索引主键（页分裂严重）。 |
-| **必选字段** | 每张业务表须包含：`id`（主键）、`created_at`（创建时间）、`updated_at`（更新时间，须设置 `ON UPDATE CURRENT_TIMESTAMP`）、`is_deleted`（软删除标记，`TINYINT(1) UNSIGNED NOT NULL DEFAULT 0`）、`deleted_at`（软删除时间，`DATETIME(3) NULL`）。**纯追加日志表**（如 `kb_llm_health_log`）例外，仅需 `id` + `created_at`，不需要 `updated_at` / `is_deleted` / `deleted_at`。 |
+| **必选字段** | 每张业务表须包含：`id`（主键）、`created_at`（创建时间）、`updated_at`（更新时间，须设置 `ON UPDATE CURRENT_TIMESTAMP`）、`is_deleted`（软删除标记，`TINYINT(1) UNSIGNED NOT NULL DEFAULT 0`）、`deleted_at`（软删除时间，`DATETIME(3) NULL`）。**纯追加日志表**（如 `kb_llm_call_log`）例外，仅需 `id` + `created_at`，不需要 `updated_at` / `is_deleted` / `deleted_at`。 |
 | **软删除** | 业务表禁止物理删除（`DELETE FROM`），须使用软删除（`UPDATE SET is_deleted=1, deleted_at=NOW(3)`）。所有查询须过滤 `WHERE is_deleted = 0`。唯一约束须使用 guard 生成列排除软删除行（软删除行 guard = NULL，MySQL 唯一索引允许多个 NULL）。 |
 | **禁用外键** | 禁止使用 `FOREIGN KEY`，关联关系在应用层维护。 |
 | **禁用存储过程/触发器/视图** | 业务逻辑不沉入数据库层，便于迁移和调试。 |

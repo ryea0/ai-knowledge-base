@@ -5,7 +5,7 @@ import type {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 
 const instance: AxiosInstance = axios.create({
   baseURL: '/api',
@@ -21,17 +21,27 @@ instance.interceptors.response.use(
   (response: AxiosResponse) => {
     const res = response.data
     if (res && typeof res === 'object' && 'code' in res) {
-      if (res.code === 200) {
+      if (res.code === 0) {
         return res.data
       }
-      ElMessage.error(res.message ?? '请求失败')
+      ElMessageBox.alert(res.message ?? '请求失败', '错误', {
+        type: 'error',
+        confirmButtonText: '确认',
+      }).catch(() => {})
       return Promise.reject(new Error(res.message ?? '请求失败'))
     }
     return res
   },
   (error) => {
-    ElMessage.error(error.message ?? '网络异常')
-    return Promise.reject(error)
+    const body = error.response?.data
+    const message = (body && typeof body === 'object' && 'message' in body)
+      ? String(body.message)
+      : error.message ?? '网络异常'
+    ElMessageBox.alert(message, '错误', {
+      type: 'error',
+      confirmButtonText: '确认',
+    }).catch(() => {})
+    return Promise.reject(new Error(message))
   },
 )
 
@@ -49,6 +59,10 @@ export function put<T = unknown>(url: string, data?: unknown, config?: AxiosRequ
 
 export function del<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
   return instance.delete(url, config)
+}
+
+export function patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  return instance.patch(url, data, config)
 }
 
 export default instance

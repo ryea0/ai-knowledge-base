@@ -166,10 +166,14 @@ def check_llm_providers(session: Session) -> ComponentHealth:
     """
     try:
         stmt = text(
-            "SELECT health_status, COUNT(*) AS cnt "
-            "FROM kb_llm_provider "
-            "WHERE is_deleted = 0 AND is_enabled = 1 "
-            "GROUP BY health_status"
+            "SELECT h.health_status, COUNT(*) AS cnt "
+            "FROM kb_llm_health h "
+            "JOIN kb_llm_provider p ON h.provider_id = p.id "
+            "JOIN kb_llm_model m ON h.model_id = m.id "
+            "WHERE h.is_deleted = 0 "
+            "AND p.is_deleted = 0 AND p.is_enabled = 1 "
+            "AND m.is_deleted = 0 AND m.is_enabled = 1 "
+            "GROUP BY h.health_status"
         )
         rows = session.execute(stmt).fetchall()
         counts: dict[str, int] = {

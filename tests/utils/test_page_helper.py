@@ -45,8 +45,6 @@ def engine() -> Engine:
                         api_key_encrypted="enc:fake",
                         priority=i,
                         is_enabled=True,
-                        health_status=0,
-                        failure_threshold=3,
                     )
                 )
         session.commit()

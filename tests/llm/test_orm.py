@@ -12,7 +12,7 @@ from __future__ import annotations
 from sqlalchemy import inspect
 
 from src.common.base_entity import Base, BaseEntity
-from src.llm.orm import LlmHealthLog, LlmModel, LlmProvider
+from src.llm.orm import LlmHealth, LlmModel, LlmProvider
 from src.models.article import Article  # noqa: F401 -- 注册到 Base.metadata
 from src.models.enums import ArticleStatus
 
@@ -37,12 +37,26 @@ class TestLlmProvider:
             "litellm_provider",
             "auth_type",
             "api_key_encrypted",
-            "auth_config",
+            "secret_key_encrypted",
+            "header_name",
+            "token_url",
             "is_enabled",
             "priority",
             "timeout_seconds",
             "max_retries",
             "rpm_limit",
+            "created_at",
+            "updated_at",
+            "is_deleted",
+            "deleted_at",
+        }
+        assert required.issubset(column_names)
+
+    def test_no_health_fields(self) -> None:
+        """不再包含健康状态字段（已移至 LlmHealth）。"""
+        mapper = inspect(LlmProvider)
+        column_names = {c.key for c in mapper.columns}
+        removed = {
             "health_status",
             "health_check_enabled",
             "last_check_at",
@@ -51,12 +65,9 @@ class TestLlmProvider:
             "consecutive_failures",
             "failure_threshold",
             "last_error",
-            "created_at",
-            "updated_at",
-            "is_deleted",
-            "deleted_at",
+            "auth_config",
         }
-        assert required.issubset(column_names)
+        assert not (removed & column_names)
 
     def test_inherits_base_entity(self) -> None:
         """继承 BaseEntity。"""
@@ -104,33 +115,41 @@ class TestLlmModel:
         assert issubclass(LlmModel, BaseEntity)
 
 
-class TestLlmHealthLog:
-    """LlmHealthLog ORM 模型测试。"""
+class TestLlmHealth:
+    """LlmHealth ORM 模型测试。"""
 
     def test_tablename(self) -> None:
-        """表名为 kb_llm_health_log。"""
-        assert LlmHealthLog.__tablename__ == "kb_llm_health_log"
+        """表名为 kb_llm_health。"""
+        assert LlmHealth.__tablename__ == "kb_llm_health"
 
     def test_has_required_columns(self) -> None:
         """包含所有必要字段。"""
-        mapper = inspect(LlmHealthLog)
+        mapper = inspect(LlmHealth)
         column_names = {c.key for c in mapper.columns}
         required = {
             "id",
             "provider_id",
             "model_id",
-            "check_at",
-            "latency_ms",
-            "is_success",
-            "error_msg",
+            "health_status",
+            "consecutive_failures",
+            "failure_threshold",
+            "health_check_enabled",
+            "last_check_at",
+            "last_success_at",
+            "last_failure_at",
+            "last_latency_ms",
+            "last_error",
             "created_at",
+            "updated_at",
+            "is_deleted",
+            "deleted_at",
         }
         assert required.issubset(column_names)
 
-    def test_inherits_base_not_base_entity(self) -> None:
-        """继承 Base 但不继承 BaseEntity（纯追加日志表）。"""
-        assert issubclass(LlmHealthLog, Base)
-        assert not issubclass(LlmHealthLog, BaseEntity)
+    def test_inherits_base_entity(self) -> None:
+        """继承 BaseEntity（不再是纯追加日志表）。"""
+        assert issubclass(LlmHealth, BaseEntity)
+        assert issubclass(LlmHealth, Base)
 
 
 class TestArticle:
@@ -194,7 +213,7 @@ class TestBase:
         table_names = set(Base.metadata.tables.keys())
         assert "kb_llm_provider" in table_names
         assert "kb_llm_model" in table_names
-        assert "kb_llm_health_log" in table_names
+        assert "kb_llm_health" in table_names
         assert "kb_article" in table_names
 
 

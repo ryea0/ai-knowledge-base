@@ -36,7 +36,7 @@ from src.common.health import (
 )
 from src.config import database
 from src.config.settings import Settings
-from src.llm.orm import Base, LlmProvider
+from src.llm.orm import Base, LlmHealth, LlmModel, LlmProvider
 from src.models.enums import (
     LlmAuthType,
     LlmHealthStatus,
@@ -77,14 +77,16 @@ def app_factory_override(
 
 
 def _make_provider(
+    session: Session,
     *,
     health: LlmHealthStatus = LlmHealthStatus.HEALTHY,
     enabled: bool = True,
     deleted: bool = False,
 ) -> LlmProvider:
-    """创建测试用供应商。
+    """创建测试用供应商（含 model + health 行）。
 
     Args:
+        session: SQLAlchemy Session。
         health: 健康状态。
         enabled: 是否启用。
         deleted: 是否软删除。
@@ -92,7 +94,7 @@ def _make_provider(
     Returns:
         LlmProvider ORM 实例。
     """
-    return LlmProvider(
+    provider = LlmProvider(
         provider_code="test",
         display_name="Test",
         provider_type=LlmProviderType.CLOUD,
@@ -101,9 +103,29 @@ def _make_provider(
         auth_type=LlmAuthType.BEARER,
         is_enabled=enabled,
         priority=100,
-        health_status=health,
         is_deleted=deleted,
     )
+    session.add(provider)
+    session.flush()
+
+    model = LlmModel(
+        provider_id=provider.id,
+        model_code="test-model",
+        litellm_model="openai/test-model",
+        display_name="Test Model",
+        is_enabled=True,
+    )
+    session.add(model)
+    session.flush()
+
+    health_row = LlmHealth(
+        provider_id=provider.id,
+        model_id=model.id,
+        health_status=health,
+    )
+    session.add(health_row)
+    session.flush()
+    return provider
 
 
 def _make_settings(
@@ -182,7 +204,7 @@ class TestCheckLlmProviders:
 
     def test_all_healthy(self, session: Session) -> None:
         """所有供应商健康时状态为 up。"""
-        session.add(_make_provider(health=LlmHealthStatus.HEALTHY))
+        _make_provider(session, health=LlmHealthStatus.HEALTHY)
         session.commit()
 
         result = check_llm_providers(session)
@@ -191,8 +213,8 @@ class TestCheckLlmProviders:
 
     def test_has_unhealthy(self, session: Session) -> None:
         """存在 unhealthy 供应商时状态为 degraded。"""
-        session.add(_make_provider(health=LlmHealthStatus.HEALTHY))
-        session.add(_make_provider(health=LlmHealthStatus.UNHEALTHY))
+        _make_provider(session, health=LlmHealthStatus.HEALTHY)
+        _make_provider(session, health=LlmHealthStatus.UNHEALTHY)
         session.commit()
 
         result = check_llm_providers(session)
@@ -201,7 +223,7 @@ class TestCheckLlmProviders:
 
     def test_all_unhealthy(self, session: Session) -> None:
         """所有供应商不可用时状态为 down。"""
-        session.add(_make_provider(health=LlmHealthStatus.UNHEALTHY))
+        _make_provider(session, health=LlmHealthStatus.UNHEALTHY)
         session.commit()
 
         result = check_llm_providers(session)
@@ -209,7 +231,7 @@ class TestCheckLlmProviders:
 
     def test_no_enabled_providers(self, session: Session) -> None:
         """无启用供应商时状态为 down。"""
-        session.add(_make_provider(health=LlmHealthStatus.HEALTHY, enabled=False))
+        _make_provider(session, health=LlmHealthStatus.HEALTHY, enabled=False)
         session.commit()
 
         result = check_llm_providers(session)
@@ -217,7 +239,7 @@ class TestCheckLlmProviders:
 
     def test_excludes_deleted(self, session: Session) -> None:
         """软删除供应商不参与统计。"""
-        session.add(_make_provider(health=LlmHealthStatus.HEALTHY, deleted=True))
+        _make_provider(session, health=LlmHealthStatus.HEALTHY, deleted=True)
         session.commit()
 
         result = check_llm_providers(session)
@@ -311,7 +333,7 @@ class TestPerformHealthCheck:
 
     def test_all_healthy(self, session: Session) -> None:
         """所有组件健康时整体 up。"""
-        session.add(_make_provider(health=LlmHealthStatus.HEALTHY))
+        _make_provider(session, health=LlmHealthStatus.HEALTHY)
         session.commit()
         settings = _make_settings(telegram="token")
 
@@ -325,7 +347,7 @@ class TestPerformHealthCheck:
 
     def test_db_down_makes_overall_down(self, session: Session) -> None:
         """数据库 down 时整体 down。"""
-        session.add(_make_provider(health=LlmHealthStatus.HEALTHY))
+        _make_provider(session, health=LlmHealthStatus.HEALTHY)
         session.commit()
         settings = _make_settings(telegram="token")
 
@@ -429,7 +451,7 @@ class TestHealthEndpoints:
     ) -> None:
         """所有组件健康时 /health 返回 200。"""
         with app_factory_override() as session:
-            session.add(_make_provider(health=LlmHealthStatus.HEALTHY))
+            _make_provider(session, health=LlmHealthStatus.HEALTHY)
             session.commit()
 
         settings = _make_settings(telegram="token")

@@ -4,7 +4,7 @@
 - ProviderCreate / ProviderResponse 验证
 - ModelCreate / ModelResponse 验证
 - DiscoveredModel 验证
-- HealthLogResponse 验证
+- HealthResponse 验证
 - extra='forbid' 约束
 """
 
@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from src.llm.schemas import (
     DiscoveredModel,
-    HealthLogResponse,
+    HealthResponse,
     ModelCreate,
     ModelUpdate,
     ProviderCreate,
@@ -41,7 +41,7 @@ class TestProviderCreate:
             display_name="DeepSeek",
             provider_type=LlmProviderType.CLOUD,
             base_url="https://api.deepseek.com/v1",
-            litellm_provider="deepseek",
+            litellm_provider="openai",
             auth_type=LlmAuthType.BEARER,
             api_key="sk-test",
         )
@@ -117,21 +117,13 @@ class TestProviderResponse:
                 self.base_url = "https://example.com"
                 self.litellm_provider = "openai"
                 self.auth_type = LlmAuthType.BEARER
-                self.api_key_encrypted = None
-                self.auth_config = None
+                self.header_name = None
+                self.token_url = None
                 self.is_enabled = True
                 self.priority = 100
                 self.timeout_seconds = 30
                 self.max_retries = 3
                 self.rpm_limit = 0
-                self.health_status = LlmHealthStatus.UNKNOWN
-                self.health_check_enabled = True
-                self.last_check_at = None
-                self.last_success_at = None
-                self.last_failure_at = None
-                self.consecutive_failures = 0
-                self.failure_threshold = 5
-                self.last_error = None
                 self.is_deleted = False
                 self.deleted_at = None
                 self.created_at = datetime(2026, 7, 27)
@@ -139,7 +131,7 @@ class TestProviderResponse:
 
         resp = ProviderResponse.model_validate(FakeProvider())
         assert resp.provider_code == "test"
-        assert resp.health_status == LlmHealthStatus.UNKNOWN
+        assert resp.header_name is None
 
 
 class TestModelCreate:
@@ -149,7 +141,7 @@ class TestModelCreate:
         """合法创建。"""
         m = ModelCreate(
             model_code="deepseek-chat",
-            litellm_model="deepseek/deepseek-chat",
+            litellm_model="openai/deepseek-chat",
             display_name="DeepSeek Chat",
         )
         assert m.model_code == "deepseek-chat"
@@ -191,22 +183,31 @@ class TestDiscoveredModel:
         assert m.context_window == 4096
 
 
-class TestHealthLogResponse:
-    """HealthLogResponse 测试。"""
+class TestHealthResponse:
+    """HealthResponse 测试。"""
 
     def test_from_attributes(self) -> None:
         """从对象属性构建。"""
 
-        class FakeLog:
+        class FakeHealth:
             def __init__(self) -> None:
                 self.id = 1
                 self.provider_id = 1
-                self.model_id = None
-                self.check_at = datetime(2026, 7, 27)
-                self.latency_ms = 150
-                self.is_success = True
-                self.error_msg = None
+                self.model_id = 10
+                self.health_status = LlmHealthStatus.HEALTHY
+                self.consecutive_failures = 0
+                self.failure_threshold = 5
+                self.health_check_enabled = True
+                self.last_check_at = datetime(2026, 7, 28)
+                self.last_success_at = datetime(2026, 7, 28)
+                self.last_failure_at = None
+                self.last_latency_ms = 150
+                self.last_error = None
+                self.is_deleted = False
+                self.deleted_at = None
+                self.created_at = datetime(2026, 7, 28)
+                self.updated_at = datetime(2026, 7, 28)
 
-        resp = HealthLogResponse.model_validate(FakeLog())
-        assert resp.is_success is True
-        assert resp.latency_ms == 150
+        resp = HealthResponse.model_validate(FakeHealth())
+        assert resp.health_status == LlmHealthStatus.HEALTHY
+        assert resp.last_latency_ms == 150

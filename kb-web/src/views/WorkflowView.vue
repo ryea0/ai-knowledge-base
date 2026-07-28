@@ -12,7 +12,7 @@ const runForm = ref({
 })
 
 // 执行历史
-const runs = ref<unknown[]>([])
+const runs = ref<Record<string, unknown>[]>([])
 
 const stageOptions = [
   { label: '全流程', value: 'all' },

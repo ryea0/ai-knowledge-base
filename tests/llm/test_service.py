@@ -30,6 +30,7 @@ from src.llm.service import (
     delete_provider,
     discover_models,
     get_provider,
+    get_provider_detail,
     list_models,
     list_providers,
     update_model,
@@ -120,6 +121,62 @@ class TestCreateProvider:
         with pytest.raises(ValueError, match="已存在"):
             create_provider(session, _provider_create("dup"))
 
+    def test_create_header_auth(self, session: Session) -> None:
+        """header 鉴权类型存储 header_name。"""
+        resp = create_provider(
+            session,
+            ProviderCreate(
+                provider_code="hdr",
+                display_name="Header",
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                auth_type=LlmAuthType.HEADER,
+                api_key="sk-test",
+                header_name="x-api-key",
+            ),
+        )
+        provider = session.get(LlmProvider, resp.id)
+        assert provider is not None
+        assert provider.header_name == "x-api-key"
+        assert provider.api_key_encrypted is not None
+
+    def test_create_oauth_auth(self, session: Session) -> None:
+        """oauth 鉴权类型存储 secret_key 和 token_url。"""
+        resp = create_provider(
+            session,
+            ProviderCreate(
+                provider_code="oauth-prov",
+                display_name="OAuth",
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                auth_type=LlmAuthType.OAUTH,
+                api_key="key",
+                secret_key="secret",
+                token_url="https://oauth.example.com/token",
+            ),
+        )
+        provider = session.get(LlmProvider, resp.id)
+        assert provider is not None
+        assert provider.secret_key_encrypted is not None
+        assert provider.token_url == "https://oauth.example.com/token"
+
+    def test_create_none_auth_ignores_header_name(self, session: Session) -> None:
+        """none 鉴权类型忽略 header_name（设为 None）。"""
+        resp = create_provider(
+            session,
+            ProviderCreate(
+                provider_code="none-prov",
+                display_name="None",
+                base_url="http://localhost:11434",
+                litellm_provider="ollama",
+                auth_type=LlmAuthType.NONE,
+                header_name="x-ignored",
+            ),
+        )
+        provider = session.get(LlmProvider, resp.id)
+        assert provider is not None
+        assert provider.header_name is None
+
 
 class TestGetProvider:
     """get_provider 测试。"""
@@ -136,6 +193,49 @@ class TestGetProvider:
         assert get_provider(session, 99999) is None
 
 
+class TestGetProviderDetail:
+    """get_provider_detail 测试。"""
+
+    def test_detail_with_models_and_health(self, session: Session) -> None:
+        """详情包含关联模型和健康状态。"""
+        provider = create_provider(session, _provider_create())
+        create_model(session, provider.id, _model_create("m1"))
+        create_model(session, provider.id, _model_create("m2", is_default=False))
+
+        detail = get_provider_detail(session, provider.id)
+        assert detail is not None
+        assert detail.provider_code == "test"
+        assert len(detail.models) == 2
+        assert detail.models[0].model_code == "m1"
+        assert len(detail.health_list) == 2
+
+    def test_detail_no_models(self, session: Session) -> None:
+        """无模型时 models 和 health_list 为空。"""
+        provider = create_provider(session, _provider_create())
+        detail = get_provider_detail(session, provider.id)
+        assert detail is not None
+        assert detail.models == []
+        assert detail.health_list == []
+
+    def test_detail_nonexistent(self, session: Session) -> None:
+        """不存在的供应商返回 None。"""
+        assert get_provider_detail(session, 99999) is None
+
+    def test_detail_excludes_deleted_models(self, session: Session) -> None:
+        """详情排除软删除的模型。"""
+        provider = create_provider(session, _provider_create())
+        m1 = create_model(session, provider.id, _model_create("m1"))
+        create_model(session, provider.id, _model_create("m2", is_default=False))
+
+        delete_model(session, m1.id)
+
+        detail = get_provider_detail(session, provider.id)
+        assert detail is not None
+        assert len(detail.models) == 1
+        assert detail.models[0].model_code == "m2"
+        assert len(detail.health_list) == 1
+
+
 class TestListProviders:
     """list_providers 测试。"""
 
@@ -149,6 +249,117 @@ class TestListProviders:
         create_provider(session, _provider_create("p2"))
         result = list_providers(session)
         assert len(result) == 2
+
+    def test_filter_by_type(self, session: Session) -> None:
+        """按 provider_type 筛选。"""
+        create_provider(
+            session,
+            ProviderCreate(
+                provider_code="cloud-1",
+                display_name="Cloud",
+                provider_type=LlmProviderType.CLOUD,
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+            ),
+        )
+        create_provider(
+            session,
+            ProviderCreate(
+                provider_code="local-1",
+                display_name="Local",
+                provider_type=LlmProviderType.LOCAL,
+                base_url="http://localhost:11434",
+                litellm_provider="ollama",
+            ),
+        )
+
+        cloud_only = list_providers(session, provider_type=LlmProviderType.CLOUD)
+        assert len(cloud_only) == 1
+        assert cloud_only[0].provider_code == "cloud-1"
+
+        local_only = list_providers(session, provider_type=LlmProviderType.LOCAL)
+        assert len(local_only) == 1
+        assert local_only[0].provider_code == "local-1"
+
+    def test_filter_by_enabled(self, session: Session) -> None:
+        """按 is_enabled 筛选。"""
+        create_provider(session, _provider_create("enabled"))
+        create_provider(
+            session,
+            ProviderCreate(
+                provider_code="disabled",
+                display_name="Disabled",
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                is_enabled=False,
+            ),
+        )
+
+        enabled_only = list_providers(session, is_enabled=True)
+        assert len(enabled_only) == 1
+        assert enabled_only[0].provider_code == "enabled"
+
+        disabled_only = list_providers(session, is_enabled=False)
+        assert len(disabled_only) == 1
+        assert disabled_only[0].provider_code == "disabled"
+
+    def test_filter_combined(self, session: Session) -> None:
+        """组合筛选 provider_type + is_enabled。"""
+        create_provider(
+            session,
+            ProviderCreate(
+                provider_code="cloud-on",
+                display_name="Cloud On",
+                provider_type=LlmProviderType.CLOUD,
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                is_enabled=True,
+            ),
+        )
+        create_provider(
+            session,
+            ProviderCreate(
+                provider_code="cloud-off",
+                display_name="Cloud Off",
+                provider_type=LlmProviderType.CLOUD,
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                is_enabled=False,
+            ),
+        )
+
+        result = list_providers(
+            session,
+            provider_type=LlmProviderType.CLOUD,
+            is_enabled=True,
+        )
+        assert len(result) == 1
+        assert result[0].provider_code == "cloud-on"
+
+    def test_model_count(self, session: Session) -> None:
+        """list_providers 填充 model_count（未软删除模型数）。"""
+        provider = create_provider(session, _provider_create("p1"))
+        create_model(session, provider.id, _model_create("m1"))
+        create_model(session, provider.id, _model_create("m2", is_default=False))
+
+        other = create_provider(session, _provider_create("p2"))
+        create_model(session, other.id, _model_create("m1"))
+
+        result = list_providers(session)
+        assert len(result) == 2
+        counts = {r.provider_code: r.model_count for r in result}
+        assert counts["p1"] == 2
+        assert counts["p2"] == 1
+
+    def test_model_count_excludes_deleted(self, session: Session) -> None:
+        """软删除的模型不计入 model_count。"""
+        provider = create_provider(session, _provider_create("p1"))
+        m1 = create_model(session, provider.id, _model_create("m1"))
+        create_model(session, provider.id, _model_create("m2", is_default=False))
+        delete_model(session, m1.id)
+
+        result = list_providers(session)
+        assert result[0].model_count == 1
 
 
 class TestUpdateProvider:
@@ -171,6 +382,49 @@ class TestUpdateProvider:
         provider = session.get(LlmProvider, created.id)
         assert provider is not None
         assert provider.api_key_encrypted is not None
+
+    def test_update_secret_key(self, session: Session) -> None:
+        """更新 Secret Key。"""
+        created = create_provider(
+            session,
+            ProviderCreate(
+                provider_code="oauth-upd",
+                display_name="OAuth",
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                auth_type=LlmAuthType.OAUTH,
+                api_key="key",
+                secret_key="old-secret",
+                token_url="https://oauth.example.com/token",
+            ),
+        )
+        update_provider(
+            session, created.id, ProviderUpdate(secret_key="new-secret")
+        )
+        provider = session.get(LlmProvider, created.id)
+        assert provider is not None
+        assert provider.secret_key_encrypted is not None
+
+    def test_update_header_name(self, session: Session) -> None:
+        """更新 header_name。"""
+        created = create_provider(
+            session,
+            ProviderCreate(
+                provider_code="hdr-upd",
+                display_name="Header",
+                base_url="https://api.example.com",
+                litellm_provider="openai",
+                auth_type=LlmAuthType.HEADER,
+                api_key="sk-test",
+                header_name="x-old",
+            ),
+        )
+        update_provider(
+            session, created.id, ProviderUpdate(header_name="x-new")
+        )
+        provider = session.get(LlmProvider, created.id)
+        assert provider is not None
+        assert provider.header_name == "x-new"
 
     def test_update_nonexistent_raises(self, session: Session) -> None:
         """更新不存在的抛 ValueError。"""
