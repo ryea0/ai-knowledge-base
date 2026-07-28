@@ -15,6 +15,7 @@
 | Agent 编排 | OpenCode + 国产大模型（如 Doubao）| 驱动各 Agent 角色协作                 |
 | 工作流引擎 | LangGraph                         | 编排采集/分析/整理的多步状态机流程    |
 | AI模型    | OpenAI 兼容 API 调用字节模型         | llm调用    |
+| LLM 调用 | LiteLLM                          | 统一多供应商 LLM 调用，支持路由/fallback/成本追踪 |
 | 爬取工具   | OpenClaw                          | 负责网页抓取与内容清洗                |
 | 数据格式   | JSON                              | 知识条目统一以 JSON 存储              |
 | 分发渠道   | Telegram Bot / 飞书 Webhook       | 多渠道推送结构化知识                  |
@@ -51,12 +52,15 @@
 | AI 分析与摘要        | `src/analyzers/`                | LLM 摘要、标签提取、分类逻辑               |
 | 知识整理与去重       | `src/organizers/`               | 去重算法、格式化与存盘逻辑                |
 | 多渠道分发           | `src/distributors/`             | Telegram / 飞书推送逻辑                    |
-| 数据模型与 Schema    | `src/models/`                   | Pydantic 模型、数据结构定义                |
+| 数据模型与 Schema    | `src/models/`                   | Pydantic 模型、数据结构定义、枚举定义      |
+| LLM 供应商管理与调用 | `src/llm/`                      | Provider/Model CRUD、LiteLLM 封装、健康检查、路由 |
 | LangGraph 工作流     | `src/graph/`                    | 状态机定义、节点编排                       |
 | 通用工具函数         | `src/utils/`                    | 跨模块复用的工具函数（如 GitHub API 封装）  |
+| 通用基础设施         | `src/common/`                   | 统一响应模型、错误码、异常处理器、链路追踪（traceId） |
 | 测试代码             | `tests/`                        | 镜像 `src/` 目录结构，`tests/collectors/` 对应 `src/collectors/` |
 | 原始采集内容         | `knowledge/raw/`                | Markdown 格式，文件名 = 条目 `article_id` |
 | 结构化知识条目       | `knowledge/articles/`           | JSON 格式，文件名 = 条目 `article_id`     |
+| 前端项目             | `kb-web/`                       | Vue 3 + TS + Vite + Element Plus 前端工程  |
 | 项目配置             | `pyproject.toml`                | 依赖与工具链配置                           |
 
 **路径规则：**
@@ -92,7 +96,7 @@
 11. **日志器规范**：每个模块顶部声明 `logger = logging.getLogger(__name__)`，禁止 `print()`，禁止 `logging.basicConfig()` 在库代码中调用（仅入口脚本可配置）。
 12. **延迟格式化**：日志消息用 `%s` 占位符 + 参数传递（如 `logger.error("失败: %s", err)`），**禁止** f-string / `.format()` / `+` 拼接（无法利用级别过滤跳过格式化开销）。
 13. **日志级别约定**：`DEBUG` = 详细的变量值/调用栈；`INFO` = 关键流程节点（采集开始/分析完成/发布成功）；`WARNING` = 可恢复的降级行为（重试、跳过）；`ERROR` = 操作失败但系统可继续；`CRITICAL` = 系统不可用。生产环境默认 `INFO`。
-14. **异常日志规范**：`logger.exception()` 自动附加 traceback，用于 `except` 块内；`logger.error(..., exc_info=True)` 同效。日志须包含操作上下文（模块名、操作类型、关键标识），但**禁止输出** API Key / Token / 密码等敏感字段。
+14. **异常日志规范**：`except` 块内**必须**使用 `logger.exception("描述")` 或 `logger.error("描述", exc_info=True)` 附加完整 traceback，**禁止**仅记录 `str(exc)` 丢失调用栈（兜底隔离点除外）。日志须包含操作上下文（模块名、操作类型、关键标识），但**禁止输出** API Key / Token / 密码等敏感字段。外部异常消息（httpx / requests 等）入库前须经脱敏处理（如 `src/llm/client.py` 的 `_sanitize_error()`），`health.py` / `service.py` 等模块的 `last_error` 字段写入时**必须调用同一脱敏函数**，禁止直接截断入库。
 
 #### 并发（Concurrency）
 
@@ -116,9 +120,11 @@
 | `MYSQL_USER`                | MySQL 用户名                  | 是   | `kb_app`                 |
 | `MYSQL_PASSWORD`            | MySQL 密码                    | 是   |                          |
 | `MYSQL_DATABASE`            | MySQL 库名                    | 是   | `ai_knowledge_base`      |
-| `LLM_API_KEY`               | LLM 服务 API Key（摘要/标签） | 是   |                          |
-| `LLM_API_BASE`              | LLM 服务端点                  | 否   | 国产模型默认端点         |
-| `LLM_MODEL`                 | LLM 模型名                    | 否   | `doubao-pro`             |
+| `LLM_PROVIDER_ENCRYPTION_KEY` | LLM 供应商 API Key 加密主密钥 | 是   | 任意 passphrase，SHA-256 派生 Fernet 密钥 |
+| `LLM_DEFAULT_PROVIDER_CODE` | 启动时默认供应商代码          | 否   | `deepseek`               |
+| `LLM_API_KEY`               | （废弃）单供应商 API Key，保留向后兼容 | 否   |                          |
+| `LLM_API_BASE`              | （废弃）单供应商端点，保留向后兼容     | 否   | 国产模型默认端点         |
+| `LLM_MODEL`                 | （废弃）单供应商模型名，保留向后兼容   | 否   | `doubao-pro`             |
 | `TELEGRAM_BOT_TOKEN`        | Telegram Bot Token            | 否\* | 未配置则跳过该渠道       |
 | `FEISHU_WEBHOOK_URL`        | 飞书 Webhook 地址             | 否\* | 未配置则跳过该渠道       |
 | `GITHUB_TOKEN`              | GitHub API Token（提升限速）  | 否   | 未配置走匿名（限速更低） |
@@ -156,13 +162,33 @@ ai-knowledge-base/
 │   ├── organizers/            # 知识整理与去重
 │   ├── distributors/          # 多渠道分发
 │   ├── models/                # 数据模型与 Pydantic schema
+│   ├── llm/                   # LLM 供应商管理（Provider/Model CRUD、LiteLLM 封装、健康检查、路由）
 │   ├── graph/                 # LangGraph 工作流定义
-│   ├── config/                # 配置加载（环境变量解析、DB 连接串拼装）
+│   ├── config/                # 配置加载（环境变量解析、DB 连接串拼装、数据库会话管理）
+│   ├── common/                # 通用基础设施（统一响应、错误码、异常处理器、链路追踪）
 │   └── utils/                 # 通用工具函数（GitHub API 封装、ID 生成等）
 ├── tests/                     # pytest 测试（镜像 src/ 目录结构）
 ├── scripts/                   # 一次性运维脚本（非业务代码）
+├── kb-web/                    # 前端工程（Vue 3 + TS + Vite + Element Plus）
+│   ├── src/
+│   │   ├── api/               # API 请求封装（axios 实例 + 各模块接口函数）
+│   │   ├── assets/            # 静态资源（图片、字体、样式）
+│   │   ├── components/        # 通用组件（跨页面复用）
+│   │   ├── composables/       # 组合式函数（Composition API hooks）
+│   │   ├── layouts/           # 布局组件（侧边栏 / 导航 / 页脚）
+│   │   ├── router/            # Vue Router 路由定义
+│   │   ├── stores/            # Pinia 状态管理
+│   │   ├── types/             # TypeScript 类型定义
+│   │   ├── views/             # 页面级组件（与路由一一对应）
+│   │   ├── App.vue            # 根组件
+│   │   └── main.ts            # 应用入口
+│   ├── public/                # 静态文件（不经 Vite 处理，直接拷贝）
+│   ├── index.html             # HTML 入口模板
+│   ├── vite.config.ts         # Vite 配置（代理、别名、构建优化）
+│   └── tsconfig.json          # TypeScript 配置
 └── deploy/                    # 部署配置
     ├── docker/                # Docker 部署（Dockerfile / docker-compose / init.sql）
+    ├── sql/                   # DDL 脚本（按编号顺序执行，docker-compose 挂载到 initdb.d）
     └── k8s/                   # Kubernetes 清单（CronJob / StatefulSet / ConfigMap / Secret）
 ```
 
@@ -359,7 +385,8 @@ ai-knowledge-base/
 | **表名** | 全小写 `snake_case`，禁止使用驼峰、拼音、数据库保留字；须加业务前缀（如 `kb_article`）。 |
 | **字段名** | 全小写 `snake_case`，禁止使用数据库保留字（`desc`/`order`/`type` 等，须加业务前缀如 `article_type`）。 |
 | **主键** | 每张表必须有主键，推荐使用 `BIGINT UNSIGNED AUTO_INCREMENT` 或分布式 ID。**禁止**使用 `UUID` 作为聚簇索引主键（页分裂严重）。 |
-| **必选字段** | 每张业务表须包含：`id`（主键）、`created_at`（创建时间）、`updated_at`（更新时间），且 `updated_at` 须设置 `ON UPDATE CURRENT_TIMESTAMP`。 |
+| **必选字段** | 每张业务表须包含：`id`（主键）、`created_at`（创建时间）、`updated_at`（更新时间，须设置 `ON UPDATE CURRENT_TIMESTAMP`）、`is_deleted`（软删除标记，`TINYINT(1) UNSIGNED NOT NULL DEFAULT 0`）、`deleted_at`（软删除时间，`DATETIME(3) NULL`）。**纯追加日志表**（如 `kb_llm_health_log`）例外，仅需 `id` + `created_at`，不需要 `updated_at` / `is_deleted` / `deleted_at`。 |
+| **软删除** | 业务表禁止物理删除（`DELETE FROM`），须使用软删除（`UPDATE SET is_deleted=1, deleted_at=NOW(3)`）。所有查询须过滤 `WHERE is_deleted = 0`。唯一约束须使用 guard 生成列排除软删除行（软删除行 guard = NULL，MySQL 唯一索引允许多个 NULL）。 |
 | **禁用外键** | 禁止使用 `FOREIGN KEY`，关联关系在应用层维护。 |
 | **禁用存储过程/触发器/视图** | 业务逻辑不沉入数据库层，便于迁移和调试。 |
 | **禁止使用数据库枚举** | 不使用 `ENUM` 类型，状态字段使用 `TINYINT UNSIGNED` 并在代码层映射；或在 MySQL 8.0+ 使用 `CHECK` 约束。 |
@@ -421,13 +448,16 @@ CREATE TABLE kb_article (
     analyzed_at     DATETIME(3)      NULL                    COMMENT '分析完成时间',
     published_at    DATETIME(3)      NULL                    COMMENT '发布时间',
     published_channels JSON          NULL                    COMMENT '已推送渠道列表',
+    is_deleted           TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+    deleted_at           DATETIME(3)      NULL                    COMMENT '软删除时间',
     created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_article_id (article_id),
     KEY idx_source_url (source_url(255)),
     KEY idx_status_created (status, created_at),
-    KEY idx_category (category)
+    KEY idx_category (category),
+    KEY idx_is_deleted (is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='知识条目表';
 ```
 
@@ -452,6 +482,355 @@ CREATE TABLE kb_article (
 13. **禁止在非约定路径创建代码文件** —— 所有代码须按 §2.2 路径规范放置，禁止随意创建目录或在根目录放置业务 `.py` 文件。
 14. **禁止在数据库中使用外键、存储过程、触发器、视图** —— 关联关系在应用层维护，业务逻辑不沉入数据库层（参见 §7.1）。
 15. **禁止 `SELECT *`** —— 须显式指定字段列表，避免索引失效和列变更隐患（参见 §7.3）。
+
+---
+
+## 9. LLM 供应商管理规范
+
+> 本节定义多 LLM 供应商的配置管理、路由策略、健康检查和模型发现规范。
+> 代码实现见 `src/llm/`，DDL 见 `deploy/sql/01-04_*.sql`，枚举定义见 `src/models/enums.py`。
+
+### 9.1 供应商与模型
+
+**三张表**：
+
+| 表 | 职责 | DDL 文件 |
+| -- | ---- | -------- |
+| `kb_llm_provider` | 供应商配置 + 健康当前状态（内联） | `deploy/sql/01_kb_llm_provider.sql` |
+| `kb_llm_model` | 模型清单（每供应商多个，`is_default` 标记默认） | `deploy/sql/02_kb_llm_model.sql` |
+| `kb_llm_health_log` | 健康检查日志（append-only，定期清理） | `deploy/sql/03_kb_llm_health_log.sql` |
+
+**枚举定义**（`src/models/enums.py`）：
+
+| 枚举 | DB 值 | JSON 字符串 | 说明 |
+| ---- | ----- | ----------- | ---- |
+| `LlmProviderType` | 0/1 | `cloud`/`local` | 供应商类型 |
+| `LlmAuthType` | 0/1/2/3 | `bearer`/`oauth`/`header`/`none` | 鉴权方式 |
+| `LlmHealthStatus` | 0/1/2/3 | `healthy`/`degraded`/`unhealthy`/`unknown` | 健康状态 |
+| `LlmModelSource` | 0/1/2 | `preset`/`discovered`/`manual` | 模型记录来源 |
+
+**鉴权方式统一存储**：
+
+| auth_type | `api_key_encrypted` | `auth_config` JSON | 典型供应商 |
+| --------- | ------------------- | ------------------ | ---------- |
+| `bearer` (0) | API Key（加密） | `null` 或 `{}` | OpenAI / DeepSeek / Ark / Qwen |
+| `oauth` (1) | API Key（加密） | `{"secret_key": "enc:...", "token_url": "..."}` | 百度千帆（二期） |
+| `header` (2) | API Key（加密） | `{"header_name": "x-goog-api-key"}` | Google Gemini（二期） |
+| `none` (3) | `NULL` | `null` | Ollama / llama.cpp |
+
+`api_key_encrypted` 须用 `LLM_PROVIDER_ENCRYPTION_KEY` 环境变量经 SHA-256 派生 Fernet 密钥加密存储，禁止明文入库。
+
+**一期支持 6 家供应商**（种子数据见 `deploy/sql/04_seed_llm_providers.sql`）：
+
+| provider_code | 类型 | auth_type | litellm_provider | base_url |
+| ------------- | ---- | --------- | ---------------- | -------- |
+| `ark` | cloud | bearer | `volcengine` | `https://ark.cn-beijing.volces.com/api/v3` |
+| `deepseek` | cloud | bearer | `deepseek` | `https://api.deepseek.com/v1` |
+| `qwen` | cloud | bearer | `openai` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `openai` | cloud | bearer | `openai` | `https://api.openai.com/v1` |
+| `ollama` | local | none | `ollama` | `http://localhost:11434/v1` |
+| `llamacpp` | local | none | `openai` | `http://localhost:8080/v1` |
+
+### 9.2 路由规则与健康状态机
+
+**路由查询**：`WHERE is_enabled=1 AND health_status != unhealthy ORDER BY priority, id`。unhealthy 供应商被自动跳过，degraded 仍可尝试。路由实现见 `src/llm/router.py`。
+
+**健康状态机**（类熔断器，实现见 `src/llm/health.py`）：
+
+```
+UNKNOWN ──首次检查──▶ HEALTHY
+HEALTHY ──失败 1 次──▶ DEGRADED
+DEGRADED ──失败达 threshold──▶ UNHEALTHY
+UNHEALTHY ──健康检查成功──▶ HEALTHY
+任意状态 ──成功──▶ HEALTHY（consecutive_failures 归零）
+```
+
+- 所有状态转换使用 CAS（`UPDATE ... WHERE id=? AND health_status=?`）保证并发安全。
+- `failure_threshold` 按供应商可配（local 类型建议设高阈值）。
+- unhealthy 供应商仅通过定时健康检查恢复，不接受业务调用自愈。
+- 健康检查日志写入 `kb_llm_health_log`（append-only），不随业务调用频率膨胀。
+
+### 9.3 模型发现
+
+通过 `GET {base_url}/models` 获取模型 ID 列表，交叉 LiteLLM 注册表（`litellm.model_cost` / `litellm.get_model_info`）补全 `context_window` / `supports_function_calling` / `supports_vision` / 定价等元数据。未命中的模型字段留默认值，`source=discovered`，前端提示用户补全。发现结果不直接写 DB，由前端用户勾选后调用 `create_model` 批量创建。实现见 `src/llm/service.py` 的 `discover_models()`。
+
+### 9.4 安全要求
+
+- `api_key_encrypted` 须用 Fernet 加密存储，密钥从 `LLM_PROVIDER_ENCRYPTION_KEY` 环境变量读取（红线 #5 延伸）。
+- 日志中禁止输出 `api_key` / `auth_config` 内容（红线 #10 延伸）。
+- `last_error` 字段须脱敏后写入，移除可能包含的 API Key 片段。
+- 供应商删除为软删除（`is_enabled=0`），保留历史日志引用完整性。
+
+---
+
+## 10. 链路追踪（traceId）规范
+
+> 本节定义 traceId 的生成、传递、注入和输出规范。
+> 实现见 `src/common/trace.py`（待实现），日志格式见 `src/main.py` / `src/config/logging.py`（待实现）。
+
+### 10.1 设计目标
+
+调用链路「采集 -> 分析 -> 整理 -> 分发」中的所有日志须可通过统一 `trace_id` 关联到同一次工作流执行。在多线程、多请求并发场景下，通过 `trace_id` 快速定位一次完整链路的全部日志。
+
+### 10.2 traceId 格式
+
+| 属性 | 规则 |
+| ---- | ---- |
+| 格式 | UUIDv4 前 8 位十六进制（如 `a1b2c3d4`），短小可读 |
+| 唯一性 | 每次工作流执行 / 每个 HTTP 请求生成一个 |
+| 大小写 | 全小写 |
+| 存储 | `str` 类型，不加密 |
+
+### 10.3 生成与传递规则
+
+**生成点（须在链路入口生成）：**
+
+| 入口 | 生成方式 | 实现位置 |
+| ---- | -------- | -------- |
+| CLI 执行 | `main()` 启动时生成，注入 `WorkflowState` | `src/main.py` |
+| LangGraph 工作流 | `build_workflow()` 执行前生成，写入 `WorkflowState["trace_id"]` | `src/graph/workflow.py` |
+| FastAPI 请求 | 从请求头 `X-Request-Id` 提取；未携带时自动生成；响应头回传 `X-Request-Id` | FastAPI 中间件（待实现） |
+
+**传递规则：**
+
+1. **工作流链路**：`trace_id` 存入 `WorkflowState["trace_id"]`，各节点函数从 `state` 中读取并传入日志。
+2. **跨函数传递**：工作流节点调用的业务函数（采集器 / 分析器 / 整理器 / 分发器）须接收 `trace_id: str` 参数并写入日志。
+3. **LLM 调用链**：`chat_completion()` / `record_success()` / `record_failure()` 等函数须接收 `trace_id` 参数，将 LLM 调用日志关联到触发它的工作流。
+4. **禁止跨链路复用**：每次工作流执行 / 每个请求生成新的 `trace_id`，禁止复用上一次执行的 ID。
+
+### 10.4 日志注入规则
+
+采用 `contextvars.ContextVar` + `logging.Filter` 实现自动注入，业务代码**无需**手动在每条日志中拼接 `trace_id`：
+
+1. **ContextVar 声明**（`src/common/trace.py`）：
+   ```python
+   import contextvars
+   trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="-")
+   ```
+
+2. **设置 traceId**：链路入口设置 `trace_id_var.set(generated_id)`，后续同线程 / 同协程内的所有日志自动携带。
+
+3. **Logging Filter**：注册全局 `logging.Filter`，从 `trace_id_var` 读取当前值并注入 `LogRecord`：
+   ```python
+   class TraceIdFilter(logging.Filter):
+       def filter(self, record: logging.LogRecord) -> bool:
+           record.trace_id = trace_id_var.get()
+           return True
+   ```
+
+4. **日志格式**：格式字符串须包含 `%(trace_id)s`：
+   ```
+   %(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s
+   ```
+
+5. **多线程传递**：`ThreadPoolExecutor` 提交任务时，须在子线程入口调用 `trace_id_var.set(parent_trace_id)`，确保子线程日志关联到同一链路。推荐使用 `contextvars.copy_context()` 传递。
+
+### 10.5 WorkflowState 字段扩展
+
+`WorkflowState`（`src/graph/state.py`）须增加 `trace_id` 字段：
+
+```python
+class WorkflowState(TypedDict, total=False):
+    trace_id: str              # 链路追踪 ID（工作流入口生成）
+    stage: str
+    candidates: list[dict[str, Any]]
+    analysis_results: list[dict[str, Any]]
+    articles: list[dict[str, Any]]
+    distribution_results: list[dict[str, Any]]
+    errors: list[dict[str, Any]]
+```
+
+### 10.6 节点日志规范
+
+工作流各节点函数（`src/graph/nodes.py`）的日志**须**携带 `trace_id`：
+
+```python
+def collect_node(state: WorkflowState) -> WorkflowState:
+    trace_id = state.get("trace_id", "-")
+    trace_id_var.set(trace_id)
+    logger.info("采集节点启动，候选条目数: %d", len(state.get("candidates", [])))
+    # trace_id 已通过 Filter 自动注入日志，无需手动拼接
+    ...
+```
+
+### 10.7 实现清单（待完成）
+
+| 序号 | 文件 | 改动内容 |
+| ---- | ---- | -------- |
+| T-01 | `src/common/trace.py` | 新建：`trace_id_var` ContextVar + `TraceIdFilter` + `generate_trace_id()` 工具函数 |
+| T-02 | `src/main.py` | 日志格式增加 `[%(trace_id)s]`；`main()` 生成 traceId 并 `set` |
+| T-03 | `src/graph/state.py` | `WorkflowState` 增加 `trace_id: str` 字段 |
+| T-04 | `src/graph/workflow.py` | `build_workflow()` 执行前生成 traceId 写入初始 state |
+| T-05 | `src/graph/nodes.py` | 各节点函数入口 `trace_id_var.set(state["trace_id"])` |
+| T-06 | `src/llm/client.py` | `chat_completion()` 增加 `trace_id` 参数，日志携带 |
+| T-07 | `src/llm/health.py` | `record_success/record_failure/check_provider_health` 增加 `trace_id` 参数；`last_error` 写入前调用 `_sanitize_error()` |
+| T-08 | `src/llm/service.py` | except 块补充 `exc_info=True`；错误日志调用 `_sanitize_error()` |
+| T-09 | `src/utils/github_api.py` | 3 处 except 块补充 `exc_info=True` |
+| T-10 | `src/mcp_knowledge_server.py` | 2 处 except 块补充 `exc_info=True` |
+
+---
+
+## 11. 前端页面规范
+
+> 本节定义前端页面划分、路由结构、各页面功能要求与组件约定。
+> 前端工程位于 `kb-web/`，技术栈见 §1（Vue 3 Composition API + TypeScript + Element Plus）。
+> 页面级组件统一放 `kb-web/src/views/`，与路由一一对应；路由定义见 `kb-web/src/router/index.ts`。
+
+### 11.1 页面总览
+
+| # | 页面 | 路由 | 菜单层级 | 状态 | 说明 |
+|---|------|------|----------|------|------|
+| 1 | 仪表盘 | `/dashboard` | 一级 | 新增 | 系统统计概览、趋势图表、健康摘要 |
+| 2 | 知识条目列表 | `/articles` | 一级 | 已有 | 条目筛选/搜索/分页，需增强标签与来源筛选 |
+| 3 | 条目详情 | `/articles/:id` | 二级 | 已有 | 完整条目信息 + 原始 Markdown 渲染 + 状态流转操作 |
+| 4 | LLM 供应商列表 | `/llm/providers` | 一级 | 已有 | 供应商 CRUD + 健康状态展示，需扩展为完整增删改查 |
+| 5 | LLM 供应商详情 | `/llm/providers/:id` | 二级 | 新增 | 供应商编辑 + 模型管理 + 模型发现 + 健康检查日志 |
+| 6 | 工作流管理 | `/workflow` | 一级 | 新增 | 任务触发 + 执行历史 + 链路追踪（traceId） |
+| 7 | 分发渠道 | `/distributors` | 一级 | 新增 | 渠道配置状态 + 分发历史 + 手动重发 |
+
+> **菜单结构**：侧边栏一级菜单为「仪表盘」「知识条目」「LLM 管理」「工作流」「分发渠道」，条目详情与供应商详情为二级页面（不在侧边栏显示，通过列表点击跳入）。
+
+### 11.2 仪表盘（DashboardView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/dashboard`，应用默认重定向目标 |
+| 组件 | `kb-web/src/views/DashboardView.vue` |
+| API | `GET /articles/stats`（条目统计）、`GET /llm/providers`（供应商健康摘要） |
+| 功能区块 | |
+
+1. **统计卡片**：知识条目总数、各状态计数（pending / reviewed / published / archived）、今日新增数。
+2. **来源平台分布**：饼图，按 `source_platform`（github_trending / hackernews）聚合。
+3. **热门标签 Top 10**：标签云或条形图，按出现频次排序。
+4. **LLM 供应商健康概览**：healthy / degraded / unhealthy / unknown 计数卡片，点击跳转供应商列表。
+5. **采集趋势**：近 7 天 / 30 天每日新增条目折线图（按 `collected_at` 聚合）。
+
+### 11.3 知识条目列表（ArticleListView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/articles` |
+| 组件 | `kb-web/src/views/ArticleListView.vue`（已存在，需增强） |
+| API | `GET /articles`（分页列表） |
+| 已有功能 | 状态筛选、分类筛选、关键词搜索、分页、行点击跳转详情 |
+| 需增强 | |
+
+1. **标签筛选**：新增标签下拉多选筛选器，支持按标签过滤。
+2. **来源平台筛选**：新增来源平台下拉（github_trending / hackernews / 全部）。
+3. **批量操作**：列表增加多选 checkbox，支持批量审核（pending→reviewed）、批量归档。
+4. **列展示优化**：标签列以 `el-tag` 展示前 3 个标签，超出显示 `+N`。
+
+### 11.4 条目详情（ArticleDetailView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/articles/:id`（`:id` = `article_id`） |
+| 组件 | `kb-web/src/views/ArticleDetailView.vue`（已存在，需增强） |
+| API | `GET /articles/:id`（条目详情）、`GET /articles/:id/raw`（原始 Markdown 内容）、`PATCH /articles/:id/status`（状态流转）、`POST /articles/:id/distribute`（触发分发） |
+| 功能区块 | |
+
+1. **基础信息区**：标题、来源链接（外链跳转）、来源平台、热度、分类、标签、语言、状态标签、各时间戳（采集 / 分析 / 发布）。
+2. **AI 摘要区**：`summary` 字段渲染，突出展示。
+3. **原始内容区（采集内容阅读）**：调用 `GET /articles/:id/raw` 获取 `content_path` 对应的 Markdown 原文，使用 Markdown 渲染组件展示。原始内容只读，禁止编辑（红线 #1）。
+4. **状态操作区**：
+   - `pending` → 「审核」按钮（转为 `reviewed`）。
+   - `reviewed` → 「分发」按钮（选择渠道触发推送）+ 「归档」按钮。
+   - `published` → 显示已推送渠道列表（`published_channels`）+ 「归档」按钮。
+   - `archived` → 仅展示，无操作按钮。
+   - 状态转换须遵循 §6.6 转换矩阵，前端按当前 `status` 控制按钮可见性。
+5. **分发渠道状态**：若 `published_channels` 非空，展示各渠道推送状态（图标 + 时间）。
+
+### 11.5 LLM 供应商列表（LlmProviderListView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/llm/providers` |
+| 组件 | `kb-web/src/views/LlmProviderView.vue`（已存在，需重构为完整 CRUD） |
+| API | `GET /llm/providers`（列表）、`POST /llm/providers`（创建）、`PATCH /llm/providers/:id`（更新）、`POST /llm/providers/:id/health-check`（手动健康检查） |
+| 已有功能 | 供应商列表只读展示 |
+| 需增强 | |
+
+1. **新增供应商**：对话框表单，字段见 `ProviderCreate`（§9.1），API Key 输入框为 password 类型，提交后明文传输至后端加密存储。
+2. **编辑供应商**：行内「编辑」按钮，打开预填表单；API Key 字段留空表示不修改。
+3. **启用/禁用切换**：`el-switch` 直接切换 `is_enabled`，禁用即软删除（§9.4）。
+4. **手动健康检查**：行内「检查」按钮，调用 `POST /llm/providers/:id/health-check`，刷新健康状态。
+5. **跳转详情**：行点击或「详情」按钮跳转 `/llm/providers/:id`。
+6. **健康状态展示**：`el-tag` 颜色映射 healthy=success / degraded=warning / unhealthy=danger / unknown=info。
+
+### 11.6 LLM 供应商详情（LlmProviderDetailView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/llm/providers/:id` |
+| 组件 | `kb-web/src/views/LlmProviderDetailView.vue`（新增） |
+| API | `GET /llm/providers/:id`、`PATCH /llm/providers/:id`、`GET /llm/providers/:id/models`、`POST /llm/providers/:id/models`、`PATCH /llm/models/:id`、`POST /llm/providers/:id/discover`（模型发现）、`GET /llm/providers/:id/health-logs`（健康日志） |
+| 布局 | `el-tabs` 多 Tab 页，Tab 切换不离开路由 |
+| 功能 Tab | |
+
+1. **Tab: 供应商信息** — 供应商完整字段展示与编辑（同 §11.5 编辑表单），含 `last_check_at` / `last_success_at` / `last_failure_at` / `consecutive_failures` / `last_error` 只读展示。
+2. **Tab: 模型管理** — 该供应商下所有模型列表（`GET /llm/providers/:id/models`），支持：
+   - 新增模型（对话框表单，字段见 `ModelCreate`）。
+   - 编辑模型（`ModelUpdate`）。
+   - 启用/禁用模型（`el-switch`）。
+   - 设为默认模型（`is_default`，同供应商仅一个默认）。
+   - 列展示：模型代码、LiteLLM 标识、上下文窗口、函数调用/多模态支持、输入/输出价格、来源（preset/discovered/manual）、启用状态、默认标记。
+3. **Tab: 模型发现** — 点击「发现模型」按钮调用 `POST /llm/providers/:id/discover`，返回 `DiscoveredModel[]` 候选列表：
+   - 表格展示候选模型，含 `already_exists` 标记（已存在行灰显）。
+   - 用户勾选未存在的模型，点击「批量导入」调用 `POST /llm/providers/:id/models` 批量创建。
+   - 未命中 LiteLLM 注册表的字段（如定价、上下文窗口）提示用户补全。
+4. **Tab: 健康检查日志** — 分页表格展示 `kb_llm_health_log` 记录：
+   - 列：检查时间、模型（如有）、延迟（ms）、结果（成功/失败）、错误信息（脱敏后）。
+   - 支持按时间范围筛选。
+
+### 11.7 工作流管理（WorkflowView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/workflow` |
+| 组件 | `kb-web/src/views/WorkflowView.vue`（新增） |
+| API | `POST /workflow/run`（触发工作流）、`GET /workflow/runs`（执行历史列表）、`GET /workflow/runs/:trace_id`（链路详情） |
+| 功能区块 | |
+
+1. **任务触发面板**：
+   - 阶段选择：`collect`（采集）/ `analyze`（分析）/ `curate`（整理）/ `distribute`（分发）/ `all`（全流程）。
+   - 采集参数：数据源选择（GitHub Trending / Hacker News / 全部）、关键词输入（逗号分隔）。
+   - 「执行」按钮触发 `POST /workflow/run`，返回 `trace_id`。
+2. **执行历史列表**：
+   - 列：traceId、阶段、开始时间、结束时间、耗时、状态（running/success/failed）、候选数、分析数、条目数。
+   - traceId 可点击复制。
+   - 支持按状态、时间范围筛选。
+3. **链路追踪详情**（点击行展开或弹窗）：
+   - 按 `trace_id` 查询关联日志，展示各节点（collect→analyze→curate→distribute）的执行时间线。
+   - 错误信息展示（`errors` 列表）。
+
+### 11.8 分发渠道（DistributionView）
+
+| 要素 | 说明 |
+| ---- | ---- |
+| 路由 | `/distributors` |
+| 组件 | `kb-web/src/views/DistributionView.vue`（新增） |
+| API | `GET /distributors/channels`（渠道配置状态）、`GET /distributions`（分发历史分页）、`POST /articles/:id/distribute`（手动重发） |
+| 功能区块 | |
+
+1. **渠道配置卡片**：
+   - Telegram：展示 `TELEGRAM_BOT_TOKEN` 配置状态（已配置/未配置），不展示 Token 明文。
+   - 飞书：展示 `FEISHU_WEBHOOK_URL` 配置状态（已配置/未配置），不展示 URL 明文。
+   - 渠道状态卡片以图标 + 状态标签展示，敏感信息脱敏（红线 #10）。
+2. **分发历史列表**：
+   - 列：条目标题、渠道（telegram/feishu）、推送时间、结果（success/skipped/failed）、错误信息。
+   - 支持按渠道、结果筛选。
+   - 分页。
+3. **手动重发**：失败行提供「重发」按钮，调用 `POST /articles/:id/distribute` 重新推送（须遵循分发幂等，§6.6 第 5 条）。
+
+### 11.9 前端通用约定
+
+1. **API 请求封装**：所有请求经 `kb-web/src/utils/request.ts`（axios 实例），统一处理 `X-Request-Id` 请求头注入与响应拦截（§10.3）。
+2. **类型定义**：与后端 Pydantic schema 对应的 TypeScript interface 放 `kb-web/src/types/` 或各 `api/*.ts` 内联定义。
+3. **状态管理**：跨页面共享状态用 Pinia store（`kb-web/src/stores/`），页面内局部状态用 `ref`/`reactive`。
+4. **状态流转前端校验**：所有状态操作按钮须按 §6.6 转换矩阵控制可见性，前端做第一道校验，后端做权威校验。
+5. **敏感信息脱敏**：前端展示 API Key / Token / Webhook URL 时仅显示掩码（如 `sk-****xxxx`），禁止明文展示（红线 #10 延伸）。
+6. **Markdown 渲染**：原始内容渲染须使用 Markdown 解析库（如 `markdown-it`），渲染前不做任何内容修改（红线 #1 延伸）。
+7. **路由懒加载**：所有页面组件使用 `() => import()` 动态导入，首屏仅加载 Dashboard。
 
 ---
 

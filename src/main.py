@@ -8,6 +8,8 @@ import argparse
 import logging
 import sys
 
+from src.config.logging_config import setup_logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,10 +36,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    setup_logging(log_level=args.log_level)
 
     logger.info("启动 AI 知识库助手，阶段: %s", args.stage)
 
