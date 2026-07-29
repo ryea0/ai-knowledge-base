@@ -5,12 +5,12 @@
 - KBState 包含全部字段
 - 各字段的类型与默认值符合设计
 - "报告式通信"原则：字段存储结构化摘要而非原始数据
-- 向后兼容：WorkflowState 仍可用
+- trace_id / errors 新增字段
 """
 
 from __future__ import annotations
 
-from src.graph.state import KBState, WorkflowState
+from src.graph.state import KBState
 
 
 class TestKBStateCreation:
@@ -30,6 +30,7 @@ class TestKBStateCreation:
     def test_all_fields(self) -> None:
         """KBState 可以包含全部字段且类型正确。"""
         state: KBState = {
+            "trace_id": "a1b2c3d4",
             "sources": [
                 {
                     "title": "Test Project",
@@ -68,15 +69,21 @@ class TestKBStateCreation:
             "review_passed": False,
             "iteration": 2,
             "cost_tracker": {
-                "collect": {"prompt_tokens": 0, "completion_tokens": 0, "total_cost": 0.0},
+                "collect": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
                 "analyze": {
                     "prompt_tokens": 1234,
                     "completion_tokens": 567,
-                    "total_cost": 0.02,
+                    "total_tokens": 1801,
                 },
             },
+            "errors": [],
         }
 
+        assert state["trace_id"] == "a1b2c3d4"
         assert len(state["sources"]) == 1
         assert state["sources"][0]["source_platform"] == "github_trending"
         assert len(state["analyses"]) == 1
@@ -87,6 +94,7 @@ class TestKBStateCreation:
         assert state["review_passed"] is False
         assert state["iteration"] == 2
         assert state["cost_tracker"]["analyze"]["prompt_tokens"] == 1234
+        assert state["cost_tracker"]["analyze"]["total_tokens"] == 1801
 
 
 class TestReportStyleCommunication:
@@ -208,18 +216,19 @@ class TestCostTracker:
                 "analyze": {
                     "prompt_tokens": 1000,
                     "completion_tokens": 500,
-                    "total_cost": 0.015,
+                    "total_tokens": 1500,
                 },
                 "review": {
                     "prompt_tokens": 800,
                     "completion_tokens": 20,
-                    "total_cost": 0.003,
+                    "total_tokens": 820,
                 },
             },
         }
         assert "analyze" in state["cost_tracker"]
         assert "review" in state["cost_tracker"]
         assert state["cost_tracker"]["analyze"]["prompt_tokens"] == 1000
+        assert state["cost_tracker"]["analyze"]["total_tokens"] == 1500
 
     def test_cost_tracker_empty_initial(self) -> None:
         """初始状态 cost_tracker 为空或未设置。"""
@@ -227,23 +236,29 @@ class TestCostTracker:
         assert "cost_tracker" not in state or state["cost_tracker"] == {}
 
 
-class TestBackwardCompatibility:
-    """向后兼容：WorkflowState 仍可正常使用。"""
+class TestNewFields:
+    """新增字段测试。"""
 
-    def test_workflow_state_still_works(self) -> None:
-        """WorkflowState 保持原有行为。"""
-        state: WorkflowState = {"stage": "collect"}
-        assert state["stage"] == "collect"
+    def test_trace_id_field(self) -> None:
+        """trace_id 字段可以设置和读取。"""
+        state: KBState = {"trace_id": "abc12345"}
+        assert state["trace_id"] == "abc12345"
 
-    def test_workflow_state_all_fields(self) -> None:
-        """WorkflowState 所有原有字段保持不变。"""
-        state: WorkflowState = {
-            "stage": "distribute",
-            "candidates": [{"title": "test"}],
-            "analysis_results": [{"summary": "test"}],
-            "articles": [{"article_id": "kb-test"}],
-            "distribution_results": [{"status": "success"}],
-            "errors": [],
+    def test_errors_field(self) -> None:
+        """errors 字段可以存储错误列表。"""
+        state: KBState = {
+            "errors": [
+                {
+                    "node": "collect",
+                    "error": "network timeout",
+                    "timestamp": "2026-07-30T10:00:00+00:00",
+                },
+            ],
         }
-        assert state["stage"] == "distribute"
-        assert len(state["candidates"]) == 1  # type: ignore[arg-type]
+        assert len(state["errors"]) == 1
+        assert state["errors"][0]["node"] == "collect"
+
+    def test_errors_empty_initial(self) -> None:
+        """初始状态 errors 未设置或为空。"""
+        state: KBState = {}
+        assert "errors" not in state or state["errors"] == []

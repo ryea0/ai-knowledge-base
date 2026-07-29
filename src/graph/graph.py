@@ -16,6 +16,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
+from src.common.trace import generate_trace_id
 from src.graph.nodes import (
     analyze_node,
     collect_node,
@@ -27,9 +28,15 @@ from src.graph.state import KBState
 
 logger = logging.getLogger(__name__)
 
+_MAX_ITERATIONS = 3
+_RECURSION_LIMIT = 15
+
 
 def _route_after_review(state: KBState) -> str:
     """审核后路由函数：通过 -> save，不通过 -> organize。
+
+    当 ``iteration`` 达到上限时也强制走向 save，作为安全网，
+    防止 review_node 异常未设置 ``review_passed`` 时无限循环。
 
     Args:
         state: 当前工作流状态。
@@ -38,6 +45,8 @@ def _route_after_review(state: KBState) -> str:
         下一节点名称（``"save"`` 或 ``"organize"``）。
     """
     if state.get("review_passed", False):
+        return "save"
+    if state.get("iteration", 0) >= _MAX_ITERATIONS:
         return "save"
     return "organize"
 
@@ -51,6 +60,7 @@ def build_graph() -> Any:
                                                  └─not passed─> organize
 
     审核循环最多 3 轮（由 review_node 内 ``iteration >= 3`` 强制通过保证）。
+    编译时设置 ``recursion_limit=15`` 防止异常情况下无限循环。
 
     Returns:
         编译后的 LangGraph 可执行图，调用 ``.invoke(state)`` 执行。
@@ -74,45 +84,74 @@ def build_graph() -> Any:
     graph.add_edge("save", END)
 
     compiled = graph.compile()
-    logger.info("LangGraph 工作流编译完成（带审核循环）")
+    logger.info("LangGraph 工作流编译完成（带审核循环, recursion_limit=%d）", _RECURSION_LIMIT)
     return compiled
+
+
+def run_workflow() -> dict[str, Any]:
+    """构建并执行工作流，返回最终状态。
+
+    在工作流入口生成 ``trace_id`` 并注入初始状态，
+    各节点通过 ``state["trace_id"]`` 传播链路追踪 ID。
+
+    Returns:
+        工作流最终状态 dict。
+    """
+    trace_id = generate_trace_id()
+    app = build_graph()
+    initial_state: KBState = {"trace_id": trace_id}
+    result: dict[str, Any] = dict(
+        app.invoke(
+            initial_state,
+            config={"recursion_limit": _RECURSION_LIMIT},
+        )
+    )
+    return result
 
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        format="%(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s",
     )
 
-    app = build_graph()
-    print("=" * 60)
-    print("LangGraph 工作流启动")
-    print("-" * 60)
+    from src.common.trace import TraceIdFilter
 
-    for event in app.stream({}):
-        for node_name, node_output in event.items():
-            print(f"\n[{node_name}] 输出:")
-            if "sources" in node_output:
-                print(f"  采集条目数: {len(node_output['sources'])}")
-            if "analyses" in node_output:
-                print(f"  分析结果数: {len(node_output['analyses'])}")
-            if "articles" in node_output:
-                print(f"  知识条目数: {len(node_output['articles'])}")
-            if "review_passed" in node_output:
-                print(f"  审核通过: {node_output['review_passed']}")
-                print(f"  iteration: {node_output.get('iteration', '?')}")
-            if "review_feedback" in node_output and node_output.get("review_feedback"):
-                print(f"  反馈: {node_output['review_feedback'][:120]}")
-            if "saved_count" in node_output:
-                print(f"  保存条目数: {node_output['saved_count']}")
-            if "cost_tracker" in node_output:
-                tracker = node_output["cost_tracker"]
-                for node, usage in tracker.items():
-                    print(
-                        f"  {node}: prompt={usage.get('prompt_tokens', 0)}, "
-                        f"completion={usage.get('completion_tokens', 0)}"
-                    )
+    handler = logging.StreamHandler()
+    handler.addFilter(TraceIdFilter())
+    logging.getLogger().addHandler(handler)
 
-    print("\n" + "=" * 60)
-    print("工作流执行完成")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("LangGraph 工作流启动")
+    logger.info("-" * 60)
+
+    final_state = run_workflow()
+
+    if "sources" in final_state:
+        logger.info("采集条目数: %d", len(final_state["sources"]))
+    if "analyses" in final_state:
+        logger.info("分析结果数: %d", len(final_state["analyses"]))
+    if "articles" in final_state:
+        logger.info("知识条目数: %d", len(final_state["articles"]))
+    if "review_passed" in final_state:
+        logger.info("审核通过: %s", final_state["review_passed"])
+        logger.info("iteration: %s", final_state.get("iteration", "?"))
+    if final_state.get("review_feedback"):
+        logger.info("反馈: %s", final_state["review_feedback"][:120])
+    if "saved_count" in final_state:
+        logger.info("保存条目数: %d", final_state["saved_count"])
+    if "cost_tracker" in final_state:
+        tracker = final_state["cost_tracker"]
+        for node, usage in tracker.items():
+            logger.info(
+                "%s: prompt=%d, completion=%d",
+                node,
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0),
+            )
+    if final_state.get("errors"):
+        logger.warning("工作流执行中有 %d 个错误", len(final_state["errors"]))
+
+    logger.info("=" * 60)
+    logger.info("工作流执行完成")
+    logger.info("=" * 60)

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
@@ -29,7 +30,7 @@ from src.llm.auth_adapter import build_auth_context, build_httpx_headers
 from src.llm.connectivity import build_openai_models_url
 from src.llm.connectivity_service import get_connectivity_map
 from src.llm.crypto import encrypt
-from src.llm.metadata_extractor import get_metadata_extractor, merge_metadata
+from src.llm.metadata_extractor import ModelMetadata, get_metadata_extractor, merge_metadata
 from src.llm.orm import LlmHealth, LlmModel, LlmProvider, LlmProviderConnectivity
 from src.llm.schemas import (
     DiscoveredModel,
@@ -45,6 +46,8 @@ from src.llm.schemas import (
 from src.models.enums import LlmAuthType, LlmHealthStatus, LlmModelSource, LlmProviderType
 
 logger = logging.getLogger(__name__)
+
+_MAX_METADATA_WORKERS = 6
 
 
 # ---------------------------------------------------------------------------
@@ -645,9 +648,18 @@ def discover_models(
     # Step 4: 按供应商协议族选择元数据提取器
     extractor = get_metadata_extractor(provider)
 
+    def _extract_one(raw: dict[str, Any]) -> tuple[dict[str, Any], ModelMetadata]:
+        """提取单个模型的元数据（供线程池调用）。"""
+        return raw, extractor.extract(raw, provider, headers)
+
+    # 并发提取元数据（Ollama 等供应商需逐模型发 HTTP 请求）
+    extracted: list[tuple[dict[str, Any], ModelMetadata]] = []
+    with ThreadPoolExecutor(max_workers=_MAX_METADATA_WORKERS) as pool:
+        extracted = list(pool.map(_extract_one, raw_models))
+
     results: list[DiscoveredModel] = []
 
-    for raw in raw_models:
+    for raw, api_meta in extracted:
         model_id_str = raw.get("id", "") or raw.get("model", "") or raw.get("name", "")
         if not model_id_str:
             continue

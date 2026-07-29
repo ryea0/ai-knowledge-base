@@ -273,30 +273,30 @@ class TestNoRetryStrategy:
     """NoRetryStrategy 测试。"""
 
     def test_max_attempts_zero(self) -> None:
-        assert NoRetryStrategy().max_attempts() == 0
+        assert NoRetryStrategy.max_attempts == 0
 
     @pytest.mark.parametrize("attempt", [0, 1, 5])
     def test_should_retry_always_false(self, attempt: int) -> None:
-        assert NoRetryStrategy().should_retry(attempt) is False
+        assert NoRetryStrategy.should_retry(attempt) is False
 
     def test_backoff_zero(self) -> None:
-        assert NoRetryStrategy().backoff_seconds(1) == 0.0
+        assert NoRetryStrategy.backoff_seconds(1) == 0.0
 
 
 class TestTimeoutRetryStrategy:
     """TimeoutRetryStrategy 测试。"""
 
     def test_max_attempts(self) -> None:
-        assert TimeoutRetryStrategy().max_attempts() == 3
+        assert TimeoutRetryStrategy.max_attempts == 3
 
     def test_should_retry_within_limit(self) -> None:
-        s = TimeoutRetryStrategy()
+        s = TimeoutRetryStrategy
         assert s.should_retry(1) is True
         assert s.should_retry(2) is True
         assert s.should_retry(3) is False
 
     def test_backoff_exponential(self) -> None:
-        s = TimeoutRetryStrategy()
+        s = TimeoutRetryStrategy
         assert s.backoff_seconds(1) == 1.0
         assert s.backoff_seconds(2) == 2.0
         assert s.backoff_seconds(3) == 4.0
@@ -306,16 +306,16 @@ class TestRateLimitRetryStrategy:
     """RateLimitRetryStrategy 测试。"""
 
     def test_max_attempts(self) -> None:
-        assert RateLimitRetryStrategy().max_attempts() == 3
+        assert RateLimitRetryStrategy.max_attempts == 3
 
     def test_should_retry_within_limit(self) -> None:
-        s = RateLimitRetryStrategy()
+        s = RateLimitRetryStrategy
         assert s.should_retry(1) is True
         assert s.should_retry(2) is True
         assert s.should_retry(3) is False
 
     def test_backoff_with_base_5s(self) -> None:
-        s = RateLimitRetryStrategy()
+        s = RateLimitRetryStrategy
         assert s.backoff_seconds(1) == 5.0
         assert s.backoff_seconds(2) == 10.0
         assert s.backoff_seconds(3) == 20.0
@@ -325,15 +325,15 @@ class TestNetworkRetryStrategy:
     """NetworkRetryStrategy 测试。"""
 
     def test_max_attempts(self) -> None:
-        assert NetworkRetryStrategy().max_attempts() == 2
+        assert NetworkRetryStrategy.max_attempts == 2
 
     def test_should_retry_within_limit(self) -> None:
-        s = NetworkRetryStrategy()
+        s = NetworkRetryStrategy
         assert s.should_retry(1) is True
         assert s.should_retry(2) is False
 
     def test_backoff_linear(self) -> None:
-        s = NetworkRetryStrategy()
+        s = NetworkRetryStrategy
         assert s.backoff_seconds(1) == 1.0
         assert s.backoff_seconds(2) == 2.0
 
@@ -342,15 +342,15 @@ class TestServerErrorRetryStrategy:
     """ServerErrorRetryStrategy 测试。"""
 
     def test_max_attempts(self) -> None:
-        assert ServerErrorRetryStrategy().max_attempts() == 2
+        assert ServerErrorRetryStrategy.max_attempts == 2
 
     def test_should_retry_within_limit(self) -> None:
-        s = ServerErrorRetryStrategy()
+        s = ServerErrorRetryStrategy
         assert s.should_retry(1) is True
         assert s.should_retry(2) is False
 
     def test_backoff_exponential(self) -> None:
-        s = ServerErrorRetryStrategy()
+        s = ServerErrorRetryStrategy
         assert s.backoff_seconds(1) == 2.0
         assert s.backoff_seconds(2) == 4.0
 
@@ -363,7 +363,7 @@ class TestRetryPolicyFactory:
     """RetryPolicyFactory 测试。"""
 
     @pytest.mark.parametrize(
-        "error_type, expected_cls",
+        "error_type, expected_strategy",
         [
             (LlmErrorType.TIMEOUT, TimeoutRetryStrategy),
             (LlmErrorType.AUTH_FAILED, NoRetryStrategy),
@@ -374,17 +374,17 @@ class TestRetryPolicyFactory:
             (LlmErrorType.UNKNOWN, NoRetryStrategy),
         ],
     )
-    def test_get_strategy_returns_correct_type(
+    def test_get_strategy_returns_correct_instance(
         self,
         error_type: LlmErrorType,
-        expected_cls: type[RetryStrategy],
+        expected_strategy: RetryStrategy,
     ) -> None:
-        """每种错误类型返回对应策略类实例。"""
+        """每种错误类型返回对应策略实例。"""
         strategy = RetryPolicyFactory.get_strategy(error_type)
-        assert isinstance(strategy, expected_cls)
+        assert strategy is expected_strategy
 
-    def test_strategy_cached(self) -> None:
-        """策略实例被缓存（同一引用）。"""
+    def test_strategy_singleton(self) -> None:
+        """策略实例为模块级单例（同一引用）。"""
         s1 = RetryPolicyFactory.get_strategy(LlmErrorType.TIMEOUT)
         s2 = RetryPolicyFactory.get_strategy(LlmErrorType.TIMEOUT)
         assert s1 is s2
@@ -398,7 +398,7 @@ class TestRetryPolicyFactory:
             LlmErrorType.SERVER_ERROR,
         ]
         for et in retryable:
-            assert RetryPolicyFactory.get_strategy(et).max_attempts() > 0
+            assert RetryPolicyFactory.get_strategy(et).max_attempts > 0
 
     def test_non_retryable_error_types(self) -> None:
         """不可重试的错误类型。"""
@@ -408,7 +408,7 @@ class TestRetryPolicyFactory:
             LlmErrorType.UNKNOWN,
         ]
         for et in non_retryable:
-            assert RetryPolicyFactory.get_strategy(et).max_attempts() == 0
+            assert RetryPolicyFactory.get_strategy(et).max_attempts == 0
 
 
 # ---------------------------------------------------------------------------

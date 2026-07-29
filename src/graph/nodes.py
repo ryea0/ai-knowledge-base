@@ -6,12 +6,13 @@
 工作流流程::
 
     collect -> analyze -> organize -> review ──passed──> save
-                                  └─not passed─> analyze (带 feedback, 最多 3 轮)
+                                  └─not passed─> organize (带 feedback, 最多 3 轮)
 
 节点使用 :func:`src.llm.client.chat_completion_with_retry` 调用 LLM
 （返回 :class:`~src.llm.response.LLMResponse`，含 token 用量），
 通过 :func:`src.llm.router.select_first_available` 获取供应商-模型对。
-LLM 调用的瞬时故障由 :func:`src.llm.retry_decorator.with_retry` 兜底重试。
+LLM 调用的瞬时故障由 ``chat_completion_with_retry`` 内部重试兜底，
+节点层不再叠加 ``@with_retry``，避免双重重试。
 """
 
 from __future__ import annotations
@@ -19,20 +20,27 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.config.database import get_session_factory
+from src.common.trace import set_trace_id
+from src.config.database import get_session_factory, session_scope
 from src.graph.state import KBState
-from src.llm.client import LlmCallError, LLMResponse, chat_completion_with_retry
+from src.llm.client import LlmCallError, chat_completion_with_retry
 from src.llm.cost import TokenUsage
+from src.llm.response import LLMResponse
 from src.llm.retry_decorator import with_retry
 from src.llm.router import select_first_available
+from src.models.article import Article
+from src.models.enums import ArticleStatus
+from src.utils.id_gen import build_article_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +60,7 @@ _HTTP_TIMEOUT = 30
 
 _MIN_SCORE = 0.6
 _MAX_ITERATIONS = 3
+_MAX_LLM_WORKERS = 5
 
 _ARTICLES_DIR = os.path.join("knowledge", "articles")
 _INDEX_FILE = os.path.join(_ARTICLES_DIR, "index.json")
@@ -104,6 +113,40 @@ _REVIEW_SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
+def _set_trace_from_state(state: KBState) -> None:
+    """从 state 中读取 trace_id 并注入日志上下文。
+
+    Args:
+        state: 当前工作流状态。
+    """
+    trace_id = state.get("trace_id", "-")
+    set_trace_id(trace_id)
+
+
+def _append_error(
+    state: KBState, node: str, error: str
+) -> list[dict[str, Any]]:
+    """向 errors 列表追加一条错误记录。
+
+    Args:
+        state: 当前工作流状态。
+        node: 出错节点名称。
+        error: 错误消息。
+
+    Returns:
+        更新后的 errors 列表。
+    """
+    errors: list[dict[str, Any]] = list(state.get("errors", []))
+    errors.append(
+        {
+            "node": node,
+            "error": error,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
+    return errors
+
+
 def _parse_json_output(raw: str, context: str) -> dict[str, Any]:
     """解析 LLM 输出的 JSON 文本。
 
@@ -120,6 +163,14 @@ def _parse_json_output(raw: str, context: str) -> dict[str, Any]:
         ValueError: 输出无法解析为合法 JSON dict。
     """
     text = raw.strip()
+    # 兼容 LLM 输出 markdown code fence 的情况
+    if text.startswith("```"):
+        lines = text.split("\n")
+        if len(lines) >= 2:
+            lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines)
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -212,9 +263,8 @@ def _call_llm(
         session=session,
     )
 
-    if isinstance(response, LLMResponse):
-        return response.content, response.usage
-    return str(response), TokenUsage(0, 0, 0)
+    assert isinstance(response, LLMResponse)
+    return response.content, response.usage
 
 
 def _call_llm_json(
@@ -256,21 +306,15 @@ def _call_llm_json(
 # ---------------------------------------------------------------------------
 
 
-def collect_node(state: KBState) -> dict[str, Any]:
-    """采集节点：调用 GitHub Search API 采集 AI 相关仓库。
+def _fetch_github_repos() -> list[dict[str, Any]]:
+    """调用 GitHub Search API 采集 AI 相关仓库。
 
-    使用 ``urllib.request`` 直接请求 GitHub Search API，
+    使用 ``urllib.request`` 请求 GitHub Search API，
     按 star 数降序排列，取前 ``_GITHUB_PER_PAGE`` 条。
-    采集结果写入 ``sources`` 字段。
-
-    Args:
-        state: 当前工作流状态（本节点不读取任何字段）。
 
     Returns:
-        状态更新 dict，包含 ``sources`` 和 ``cost_tracker``。
+        采集到的数据源摘要列表。
     """
-    logger.info("[collect_node] 启动 GitHub 仓库采集")
-
     params = urllib.parse.urlencode(
         {
             "q": _GITHUB_AI_QUERY,
@@ -289,29 +333,74 @@ def collect_node(state: KBState) -> dict[str, Any]:
     if github_token:
         headers["Authorization"] = f"Bearer {github_token}"
 
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310
+        data = json.loads(resp.read().decode("utf-8"))
+
+    sources: list[dict[str, Any]] = []
+    for repo in data.get("items", []):
+        sources.append(
+            {
+                "title": repo.get("full_name", ""),
+                "url": repo.get("html_url", ""),
+                "source_platform": "github_trending",
+                "source_score": repo.get("stargazers_count", 0),
+                "summary": repo.get("description", ""),
+                "content_path": "",
+            }
+        )
+    return sources
+
+
+def collect_node(state: KBState) -> dict[str, Any]:
+    """采集节点：调用 GitHub Search API 采集 AI 相关仓库。
+
+    使用 ``urllib.request`` 直接请求 GitHub Search API，
+    按 star 数降序排列，取前 ``_GITHUB_PER_PAGE`` 条。
+    采集结果写入 ``sources`` 字段。
+    网络错误通过 ``@with_retry`` 指数退避重试（最多 3 次）。
+    若重试耗尽仍失败，将错误写入 ``errors`` 字段并返回空列表。
+
+    Args:
+        state: 当前工作流状态（本节点不读取任何字段）。
+
+    Returns:
+        状态更新 dict，包含 ``sources``，可能包含 ``errors``。
+    """
+    _set_trace_from_state(state)
+    logger.info("启动 GitHub 仓库采集")
+
+    errors: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
     try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310
-            data = json.loads(resp.read().decode("utf-8"))
-        for repo in data.get("items", []):
-            sources.append(
-                {
-                    "title": repo.get("full_name", ""),
-                    "url": repo.get("html_url", ""),
-                    "source_platform": "github_trending",
-                    "source_score": repo.get("stargazers_count", 0),
-                    "summary": repo.get("description", ""),
-                    "content_path": "",
-                }
-            )
-        logger.info("[collect_node] 采集完成, 共 %d 条", len(sources))
-    except urllib.error.URLError as exc:
-        logger.error("[collect_node] GitHub API 请求失败: %s", exc)
+        sources = _fetch_github_repos_with_retry()
+        logger.info("采集完成, 共 %d 条", len(sources))
+    except (urllib.error.URLError, OSError) as exc:
+        logger.error("GitHub API 请求失败: %s", exc, exc_info=True)
+        errors = _append_error(state, "collect", str(exc))
     except (json.JSONDecodeError, KeyError) as exc:
-        logger.error("[collect_node] GitHub API 响应解析失败: %s", exc)
+        logger.error("GitHub API 响应解析失败: %s", exc, exc_info=True)
+        errors = _append_error(state, "collect", str(exc))
 
-    return {"sources": sources}
+    result: dict[str, Any] = {"sources": sources}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
+@with_retry(
+    retry_on=(urllib.error.URLError, OSError),
+    max_attempts=3,
+    base_delay=1.0,
+    max_delay=60.0,
+)
+def _fetch_github_repos_with_retry() -> list[dict[str, Any]]:
+    """带重试的 GitHub 仓库采集。
+
+    Returns:
+        采集到的数据源摘要列表。
+    """
+    return _fetch_github_repos()
 
 
 # ---------------------------------------------------------------------------
@@ -319,16 +408,12 @@ def collect_node(state: KBState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@with_retry(
-    retry_on=(LlmCallError,),
-    max_attempts=3,
-    base_delay=1.0,
-)
 def analyze_node(state: KBState) -> dict[str, Any]:
     """分析节点：用 LLM 对每条数据生成中文摘要、标签、评分。
 
     遍历 ``sources`` 中的每条候选条目，调用 LLM 进行分析，
     将结果写入 ``analyses`` 字段。Token 用量累加到 ``cost_tracker["analyze"]``。
+    使用 ``ThreadPoolExecutor(max_workers=5)`` 并发调用 LLM 以加速分析。
 
     Args:
         state: 当前工作流状态，须包含 ``sources``。
@@ -336,19 +421,37 @@ def analyze_node(state: KBState) -> dict[str, Any]:
     Returns:
         状态更新 dict，包含 ``analyses`` 和 ``cost_tracker``。
     """
-    logger.info("[analyze_node] 启动, 待分析条目数: %d", len(state.get("sources", [])))
+    _set_trace_from_state(state)
+    logger.info("启动, 待分析条目数: %d", len(state.get("sources", [])))
 
     sources = state.get("sources", [])
     if not sources:
-        logger.warning("[analyze_node] 无待分析条目")
+        logger.warning("无待分析条目")
         return {"analyses": []}
 
     session = _get_session()
     cost_tracker: dict[str, Any] = dict(state.get("cost_tracker", {}))
     analyses: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = list(state.get("errors", []))
 
     try:
-        for item in sources:
+        # 缓存 provider/model 查询结果，避免循环内重复查 DB
+        pair = select_first_available(session)
+        if pair is None:
+            raise RuntimeError("无可用 LLM 供应商-模型组合")
+        provider, model = pair
+
+        def _analyze_one(
+            item: dict[str, Any],
+        ) -> tuple[dict[str, Any], TokenUsage]:
+            """分析单条数据源。
+
+            Args:
+                item: 数据源摘要 dict。
+
+            Returns:
+                (分析结果 dict, TokenUsage) 元组。
+            """
             prompt = (
                 f"仓库名称: {item.get('title', '')}\n"
                 f"仓库链接: {item.get('url', '')}\n"
@@ -366,17 +469,39 @@ def analyze_node(state: KBState) -> dict[str, Any]:
             result["source_url"] = item.get("url", "")
             result["source_platform"] = item.get("source_platform", "")
             result["source_score"] = item.get("source_score", 0)
-            _accumulate_usage(cost_tracker, "analyze", usage)
-            analyses.append(result)
-            logger.info(
-                "[analyze_node] 分析完成: %s (score=%s)",
-                result.get("title", "?"),
-                result.get("score", "?"),
-            )
+            return result, usage
+
+        with ThreadPoolExecutor(max_workers=_MAX_LLM_WORKERS) as pool:
+            futures = [pool.submit(_analyze_one, item) for item in sources]
+            for fut in futures:
+                try:
+                    analysis, usage = fut.result()
+                    _accumulate_usage(cost_tracker, "analyze", usage)
+                    analyses.append(analysis)
+                    logger.info(
+                        "分析完成: %s (score=%s)",
+                        analysis.get("title", "?"),
+                        analysis.get("score", "?"),
+                    )
+                except LlmCallError as exc:
+                    logger.error("LLM 调用失败: %s", exc, exc_info=True)
+                    errors.append(
+                        {
+                            "node": "analyze",
+                            "error": str(exc),
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+                    )
     finally:
         session.close()
 
-    return {"analyses": analyses, "cost_tracker": cost_tracker}
+    result: dict[str, Any] = {
+        "analyses": analyses,
+        "cost_tracker": cost_tracker,
+    }
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -384,11 +509,6 @@ def analyze_node(state: KBState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@with_retry(
-    retry_on=(LlmCallError,),
-    max_attempts=3,
-    base_delay=1.0,
-)
 def organize_node(state: KBState) -> dict[str, Any]:
     """整理节点：过滤低分、按 URL 去重、如有审核反馈则用 LLM 修正。
 
@@ -404,7 +524,8 @@ def organize_node(state: KBState) -> dict[str, Any]:
     Returns:
         状态更新 dict，包含 ``articles`` 和 ``cost_tracker``。
     """
-    logger.info("[organize_node] 启动, 分析结果数: %d", len(state.get("analyses", [])))
+    _set_trace_from_state(state)
+    logger.info("启动, 分析结果数: %d", len(state.get("analyses", [])))
 
     analyses = state.get("analyses", [])
     iteration = state.get("iteration", 0)
@@ -412,9 +533,7 @@ def organize_node(state: KBState) -> dict[str, Any]:
     cost_tracker: dict[str, Any] = dict(state.get("cost_tracker", {}))
 
     filtered = [a for a in analyses if _safe_float(a.get("score", 0)) >= _MIN_SCORE]
-    logger.info(
-        "[organize_node] 低分过滤: %d -> %d", len(analyses), len(filtered)
-    )
+    logger.info("低分过滤: %d -> %d", len(analyses), len(filtered))
 
     seen_urls: set[str] = set()
     deduped: list[dict[str, Any]] = []
@@ -425,15 +544,12 @@ def organize_node(state: KBState) -> dict[str, Any]:
         if url:
             seen_urls.add(url)
         deduped.append(item)
-    logger.info(
-        "[organize_node] URL 去重: %d -> %d", len(filtered), len(deduped)
-    )
+    logger.info("URL 去重: %d -> %d", len(filtered), len(deduped))
 
     articles: list[dict[str, Any]] = []
     if iteration > 0 and feedback:
         logger.info(
-            "[organize_node] 检测到审核反馈 (iteration=%d), 调用 LLM 修正",
-            iteration,
+            "检测到审核反馈 (iteration=%d), 调用 LLM 修正", iteration
         )
         session = _get_session()
         try:
@@ -469,13 +585,8 @@ def organize_node(state: KBState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@with_retry(
-    retry_on=(LlmCallError,),
-    max_attempts=3,
-    base_delay=1.0,
-)
 def review_node(state: KBState) -> dict[str, Any]:
-    """审核节点：LLM 四维度评分，iteration >= 2 强制通过。
+    """审核节点：LLM 四维度评分，iteration >= 3 强制通过。
 
     评分维度：摘要质量 / 标签准确 / 分类合理 / 一致性。
     当 ``iteration >= _MAX_ITERATIONS`` 时跳过 LLM 审核直接强制通过，
@@ -488,28 +599,27 @@ def review_node(state: KBState) -> dict[str, Any]:
         状态更新 dict，包含 ``review_passed``、``review_feedback``
         和 ``cost_tracker``。
     """
+    _set_trace_from_state(state)
     iteration = state.get("iteration", 0)
     logger.info(
-        "[review_node] 启动, iteration=%d, 待审核条目数: %d",
+        "启动, iteration=%d, 待审核条目数: %d",
         iteration,
         len(state.get("articles", [])),
     )
 
     if iteration >= _MAX_ITERATIONS:
         logger.warning(
-            "[review_node] iteration=%d >= %d, 强制通过",
-            iteration,
-            _MAX_ITERATIONS,
+            "iteration=%d >= %d, 强制通过", iteration, _MAX_ITERATIONS
         )
         return {
             "review_passed": True,
             "review_feedback": "",
-            "iteration": iteration + 1,
+            "iteration": iteration,
         }
 
     articles = state.get("articles", [])
     if not articles:
-        logger.warning("[review_node] 无待审核条目, 自动通过")
+        logger.warning("无待审核条目, 自动通过")
         return {
             "review_passed": True,
             "review_feedback": "",
@@ -545,7 +655,7 @@ def review_node(state: KBState) -> dict[str, Any]:
         feedback = ""
 
     logger.info(
-        "[review_node] 审核完成: passed=%s, score=%.1f, feedback=%s",
+        "审核完成: passed=%s, score=%.1f, feedback=%s",
         passed,
         overall_score,
         feedback[:100],
@@ -565,10 +675,12 @@ def review_node(state: KBState) -> dict[str, Any]:
 
 
 def save_node(state: KBState) -> dict[str, Any]:
-    """保存节点：将 articles 写入 knowledge/articles/ 的 JSON 文件。
+    """保存节点：将 articles 写入 DB 和 knowledge/articles/ JSON 文件。
 
+    写入顺序遵循 article-format spec §4：先写 DB（事务内），
+    成功后同步写 JSON 文件。DB 为 source of truth，JSON 为磁盘投影。
     每条 article 写入独立的 ``<article_id>.json`` 文件，
-    同时更新 ``index.json`` 索引文件（包含所有条目的元信息摘要）。
+    同时更新 ``index.json`` 索引文件。
 
     Args:
         state: 当前工作流状态，须包含 ``articles``。
@@ -576,36 +688,52 @@ def save_node(state: KBState) -> dict[str, Any]:
     Returns:
         状态更新 dict，包含 ``saved_count``。
     """
-    logger.info(
-        "[save_node] 启动, 待保存条目数: %d", len(state.get("articles", []))
-    )
+    _set_trace_from_state(state)
+    logger.info("启动, 待保存条目数: %d", len(state.get("articles", [])))
 
     articles = state.get("articles", [])
     if not articles:
-        logger.warning("[save_node] 无待保存条目")
+        logger.warning("无待保存条目")
         return {"saved_count": 0}
 
     os.makedirs(_ARTICLES_DIR, exist_ok=True)
 
     saved: list[dict[str, Any]] = []
-    for article in articles:
-        article_id = article.get("article_id") or _generate_article_id()
-        article["article_id"] = article_id
+    with session_scope() as session:
+        for article in articles:
+            # 浅拷贝避免 mutate 输入 state（纯函数约定）
+            article = dict(article)
 
-        if "collected_at" not in article:
-            article["collected_at"] = datetime.now(UTC).isoformat()
-        if "status" not in article:
-            article["status"] = "pending"
+            article_id = article.get("article_id") or _generate_article_id()
+            article["article_id"] = article_id
 
-        file_path = os.path.join(_ARTICLES_DIR, f"{article_id}.json")
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(article, f, ensure_ascii=False, indent=2)
-        logger.info("[save_node] 已保存: %s", file_path)
-        saved.append(article)
+            if "collected_at" not in article:
+                article["collected_at"] = datetime.now(UTC).isoformat()
+            if "status" not in article:
+                article["status"] = "pending"
+
+            # 写 DB
+            orm_obj = _to_article_orm(article)
+            session.add(orm_obj)
+            session.flush()
+            db_id = orm_obj.id
+            # 用 DB 自增主键回填 article_id
+            collected_at = datetime.now(UTC).replace(tzinfo=None)
+            article["article_id"] = build_article_id(db_id, collected_at)
+            orm_obj.article_id = article["article_id"]
+
+            # 写 JSON 文件
+            file_path = os.path.join(
+                _ARTICLES_DIR, f"{article['article_id']}.json"
+            )
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(article, f, ensure_ascii=False, indent=2)
+            logger.info("已保存: %s", file_path)
+            saved.append(article)
 
     _update_index(saved)
 
-    logger.info("[save_node] 保存完成, 共 %d 条", len(saved))
+    logger.info("保存完成, 共 %d 条", len(saved))
     return {"saved_count": len(saved)}
 
 
@@ -659,25 +787,88 @@ def _to_article_dict(analysis: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _generate_article_id() -> str:
-    """生成基于时间戳的 article_id。
+def _to_article_orm(article: dict[str, Any]) -> Article:
+    """将 article dict 转换为 Article ORM 对象。
 
-    使用日期 + 8 位十六进制时间戳，保证单进程内唯一性。
+    Args:
+        article: 知识条目 dict。
 
     Returns:
-        形如 ``kb-20260730-a1b2c3d4`` 的 ID。
+        Article ORM 实例（尚未持久化）。
     """
+    status_str = article.get("status", "pending")
+    try:
+        status = ArticleStatus.from_json_str(status_str)
+    except ValueError:
+        status = ArticleStatus.PENDING
+
+    collected_at_str = article.get("collected_at", "")
+    if collected_at_str:
+        try:
+            collected_at = datetime.fromisoformat(collected_at_str).replace(
+                tzinfo=None
+            )
+        except ValueError:
+            collected_at = datetime.now(UTC).replace(tzinfo=None)
+    else:
+        collected_at = datetime.now(UTC).replace(tzinfo=None)
+
+    analyzed_at_str = article.get("analyzed_at")
+    analyzed_at: datetime | None = None
+    if analyzed_at_str:
+        try:
+            analyzed_at = datetime.fromisoformat(analyzed_at_str).replace(
+                tzinfo=None
+            )
+        except ValueError:
+            analyzed_at = None
+
+    return Article(
+        article_id=article.get("article_id", ""),
+        title=article.get("title", ""),
+        source_url=article.get("source_url", ""),
+        source_platform=article.get("source_platform", "github_trending"),
+        source_score=article.get("source_score", 0),
+        summary=article.get("summary", ""),
+        content_path=article.get("content_path", ""),
+        tags=article.get("tags", []),
+        category=article.get("category", "news"),
+        status=status,
+        language=article.get("language", "zh"),
+        collected_at=collected_at,
+        analyzed_at=analyzed_at,
+        score=int(_safe_float(article.get("score", 0)) * 10)
+        if article.get("score") is not None
+        else None,
+        highlights=article.get("highlights"),
+    )
+
+
+def _generate_article_id() -> str:
+    """生成基于时间戳 + 随机后缀的临时 article_id。
+
+    使用日期 + 8 位十六进制时间戳 + 4 位随机后缀，保证单进程内唯一性。
+    此 ID 为临时占位，save_node 写入 DB 后会用 ``build_article_id(db_id, ...)``
+    回填正式的 ``kb-YYYYMMDD-NNNN`` 格式 ID。
+
+    Returns:
+        形如 ``kb-20260730-a1b2c3d4e5f6`` 的临时 ID。
+    """
+    import uuid
+
     now = datetime.now(UTC)
     date_str = now.strftime("%Y%m%d")
     time_hex = f"{int(now.timestamp()):08x}"[-8:]
-    return f"kb-{date_str}-{time_hex}"
+    random_suffix = uuid.uuid4().hex[:4]
+    return f"kb-{date_str}-{time_hex}{random_suffix}"
 
 
 def _update_index(articles: list[dict[str, Any]]) -> None:
-    """更新 index.json 索引文件。
+    """更新 index.json 索引文件（原子写入）。
 
     读取现有索引（如果存在），合并新条目，写回文件。
     索引中每条记录只保留摘要字段（article_id / title / source_url / category / status）。
+    使用临时文件 + ``os.replace`` 保证原子性，避免并发写入丢更新。
 
     Args:
         articles: 本次保存的知识条目列表。
@@ -708,6 +899,17 @@ def _update_index(articles: list[dict[str, Any]]) -> None:
                     existing[i] = entry
                     break
 
-    with open(_INDEX_FILE, "w", encoding="utf-8") as f:
-        json.dump(existing, f, ensure_ascii=False, indent=2)
-    logger.info("[save_node] 索引已更新: %s (%d 条)", _INDEX_FILE, len(existing))
+    # 原子写入：先写临时文件，再 os.replace 覆盖
+    os.makedirs(os.path.dirname(_INDEX_FILE), exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(_INDEX_FILE), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, _INDEX_FILE)
+    except OSError:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+    logger.info("索引已更新: %s (%d 条)", _INDEX_FILE, len(existing))

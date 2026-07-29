@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -66,9 +66,7 @@ def _insert_call_log(
     days_ago: int = 0,
 ) -> None:
     """向 kb_llm_call_log 插入一条成功调用日志。"""
-    from datetime import timedelta
-
-    called_at = datetime.utcnow() - timedelta(days=days_ago)
+    called_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_ago)
     log = LlmCallLog(
         trace_id="test",
         provider_id=1,
@@ -226,7 +224,7 @@ class TestCheckPreCall:
             is_success=False,
             cost_amount=10.0,
             cost_currency="CNY",
-            called_at=datetime.utcnow(),
+            called_at=datetime.now(UTC).replace(tzinfo=None),
         )
         session.add(log)
         session.flush()

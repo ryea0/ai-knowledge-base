@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -292,7 +292,7 @@ class BudgetGuard:
         Returns:
             当日已消耗总成本。无记录时返回 0.0。
         """
-        today = datetime.utcnow().date()
+        today = datetime.now(UTC).replace(tzinfo=None).date()
         stmt = (
             select(func.coalesce(func.sum(LlmCallLog.cost_amount), 0.0))
             .where(

@@ -15,7 +15,7 @@ DDL 见 ``deploy/sql/01-03_*.sql`` / ``deploy/sql/08_kb_llm_call_log.sql``，
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, BigInteger, DateTime, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +27,11 @@ from src.models.enums import (
     LlmModelSource,
     LlmProviderType,
 )
+
+
+def _utc_now() -> datetime:
+    """返回当前 UTC naive datetime（替代废弃的 ``datetime.utcnow``）。"""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 __all__ = [
     "Base",
@@ -315,7 +320,7 @@ class LlmCallLog(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_msg: Mapped[str | None] = mapped_column(String(500), nullable=True)
     called_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), nullable=False, default=datetime.utcnow
+        DateTime(timezone=False), nullable=False, default=_utc_now
     )
     is_deleted: Mapped[bool] = mapped_column(
         Integer, nullable=False, default=False
@@ -324,8 +329,8 @@ class LlmCallLog(Base):
         DateTime(timezone=False), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), nullable=False, default=datetime.utcnow
+        DateTime(timezone=False), nullable=False, default=_utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), nullable=False, default=datetime.utcnow
+        DateTime(timezone=False), nullable=False, default=_utc_now
     )

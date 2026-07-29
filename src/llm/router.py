@@ -88,8 +88,8 @@ def select_first_available(
 ) -> tuple[LlmProvider, LlmModel] | None:
     """选择第一个可用的 (provider, model) 组合。
 
-    等价于 ``get_routable_chain(session)[0]``，但更简洁。
-    用于不需要 fallback 的简单场景。
+    与 ``get_routable_chain(session)[0]`` 等价，但仅加载首条记录，
+    避免 ``quick_chat`` 等高频场景全量加载路由链。
 
     Args:
         session: SQLAlchemy Session。
@@ -97,8 +97,27 @@ def select_first_available(
     Returns:
         (provider, model) 元组，无可用时返回 None。
     """
-    chain = get_routable_chain(session)
-    return chain[0] if chain else None
+    stmt = (
+        select(LlmProvider, LlmModel)
+        .join(LlmModel, LlmModel.provider_id == LlmProvider.id)
+        .join(LlmHealth, LlmHealth.model_id == LlmModel.id)
+        .where(
+            LlmProvider.is_enabled == True,  # noqa: E712
+            LlmProvider.is_deleted == False,  # noqa: E712
+            LlmModel.is_default == True,  # noqa: E712
+            LlmModel.is_enabled == True,  # noqa: E712
+            LlmModel.is_deleted == False,  # noqa: E712
+            LlmHealth.is_deleted == False,  # noqa: E712
+            LlmHealth.health_status != LlmHealthStatus.UNHEALTHY,
+        )
+        .order_by(LlmProvider.priority, LlmProvider.id)
+        .limit(1)
+    )
+    row = session.execute(stmt).first()
+    if row is None:
+        logger.warning("无可用 LLM 供应商-模型路由链")
+        return None
+    return row[0], row[1]
 
 
 def get_all_enabled_providers(session: Session) -> Sequence[LlmProvider]:

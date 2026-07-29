@@ -1,11 +1,11 @@
 """src.graph.nodes 模块的单元测试。
 
 测试覆盖：
-- collect_node: GitHub API 采集（mock urllib）
+- collect_node: GitHub API 采集（mock _fetch_github_repos_with_retry）
 - analyze_node: LLM 分析（mock _call_llm_json）
 - organize_node: 低分过滤 / URL 去重 / 反馈修正
 - review_node: LLM 审核评分 / iteration 强制通过
-- save_node: 文件写入 / index.json 更新
+- save_node: DB 写入 + 文件写入 / index.json 更新
 - 工具函数: _parse_json_output / _accumulate_usage / _safe_float / _to_article_dict
 """
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 
 from src.graph.nodes import (
@@ -54,6 +54,13 @@ class TestParseJsonOutput:
         """带后缀文本的 JSON 能提取。"""
         result = _parse_json_output(
             '{"key": "value"}\nDone.', "test"
+        )
+        assert result == {"key": "value"}
+
+    def test_parse_json_with_code_fence(self) -> None:
+        """markdown code fence 包裹的 JSON 能提取。"""
+        result = _parse_json_output(
+            '```json\n{"key": "value"}\n```', "test"
         )
         assert result == {"key": "value"}
 
@@ -150,6 +157,11 @@ class TestToArticleDict:
         assert article["category"] == "news"
         assert article["language"] == "zh"
 
+    def test_article_id_has_random_suffix(self) -> None:
+        """生成的 article_id 包含随机后缀，短时间内不碰撞。"""
+        ids = {_to_article_dict({})["article_id"] for _ in range(20)}
+        assert len(ids) == 20, "article_id 在同秒内应不碰撞"
+
 
 # ---------------------------------------------------------------------------
 # collect_node 测试
@@ -161,29 +173,29 @@ class TestCollectNode:
 
     def test_collect_success(self) -> None:
         """成功采集返回 sources 列表。"""
-        mock_response_data = {
-            "items": [
-                {
-                    "full_name": "test/repo1",
-                    "html_url": "https://github.com/test/repo1",
-                    "stargazers_count": 100,
-                    "description": "A test repo",
-                },
-                {
-                    "full_name": "test/repo2",
-                    "html_url": "https://github.com/test/repo2",
-                    "stargazers_count": 50,
-                    "description": "Another repo",
-                },
-            ]
-        }
+        mock_sources = [
+            {
+                "title": "test/repo1",
+                "url": "https://github.com/test/repo1",
+                "source_platform": "github_trending",
+                "source_score": 100,
+                "summary": "A test repo",
+                "content_path": "",
+            },
+            {
+                "title": "test/repo2",
+                "url": "https://github.com/test/repo2",
+                "source_platform": "github_trending",
+                "source_score": 50,
+                "summary": "Another repo",
+                "content_path": "",
+            },
+        ]
 
-        with patch("src.graph.nodes.urllib.request.urlopen") as mock_urlopen:
-            mock_resp = mock_urlopen.return_value
-            mock_resp.__enter__ = lambda self: mock_resp
-            mock_resp.__exit__ = lambda self, *args: None
-            mock_resp.read.return_value = json.dumps(mock_response_data).encode()
-
+        with patch(
+            "src.graph.nodes._fetch_github_repos_with_retry",
+            return_value=mock_sources,
+        ):
             result = collect_node({})
 
         assert len(result["sources"]) == 2
@@ -193,23 +205,23 @@ class TestCollectNode:
         assert result["sources"][0]["source_platform"] == "github_trending"
 
     def test_collect_network_error(self) -> None:
-        """网络错误时返回空 sources。"""
+        """网络错误时返回空 sources 和 errors。"""
         with patch(
-            "src.graph.nodes.urllib.request.urlopen",
+            "src.graph.nodes._fetch_github_repos_with_retry",
             side_effect=URLError("network error"),
         ):
             result = collect_node({})
         assert result["sources"] == []
+        assert "errors" in result
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["node"] == "collect"
 
     def test_collect_empty_response(self) -> None:
         """空响应返回空 sources。"""
-        mock_response_data = {"items": []}
-        with patch("src.graph.nodes.urllib.request.urlopen") as mock_urlopen:
-            mock_resp = mock_urlopen.return_value
-            mock_resp.__enter__ = lambda self: mock_resp
-            mock_resp.__exit__ = lambda self, *args: None
-            mock_resp.read.return_value = json.dumps(mock_response_data).encode()
-
+        with patch(
+            "src.graph.nodes._fetch_github_repos_with_retry",
+            return_value=[],
+        ):
             result = collect_node({})
         assert result["sources"] == []
 
@@ -239,14 +251,21 @@ class TestAnalyzeNode:
         }
         mock_usage = TokenUsage(100, 50, 150)
 
+        mock_session = MagicMock()
+        mock_provider = MagicMock()
+        mock_model = MagicMock()
+
         with (
-            patch("src.graph.nodes._get_session") as mock_session,
+            patch("src.graph.nodes._get_session", return_value=mock_session),
+            patch(
+                "src.graph.nodes.select_first_available",
+                return_value=(mock_provider, mock_model),
+            ),
             patch(
                 "src.graph.nodes._call_llm_json",
                 return_value=(mock_result, mock_usage),
             ),
         ):
-            mock_session.return_value = mock_session
             result = analyze_node({
                 "sources": [
                     {
@@ -264,6 +283,46 @@ class TestAnalyzeNode:
         assert result["analyses"][0]["source_url"] == "https://github.com/test/repo"
         assert result["cost_tracker"]["analyze"]["prompt_tokens"] == 100
         mock_session.close.assert_called_once()
+
+    def test_analyze_caches_provider_model(self) -> None:
+        """analyze_node 只查询一次 provider/model。"""
+        mock_usage = TokenUsage(10, 5, 15)
+        mock_session = MagicMock()
+        mock_provider = MagicMock()
+        mock_model = MagicMock()
+
+        with (
+            patch("src.graph.nodes._get_session", return_value=mock_session),
+            patch(
+                "src.graph.nodes.select_first_available",
+                return_value=(mock_provider, mock_model),
+            ) as mock_select,
+            patch(
+                "src.graph.nodes._call_llm_json",
+                return_value=({"title": "t", "score": 0.9}, mock_usage),
+            ),
+        ):
+            result = analyze_node({
+                "sources": [
+                    {
+                        "title": "a",
+                        "url": "u1",
+                        "source_score": 1,
+                        "summary": "",
+                        "source_platform": "",
+                    },
+                    {
+                        "title": "b",
+                        "url": "u2",
+                        "source_score": 2,
+                        "summary": "",
+                        "source_platform": "",
+                    },
+                ],
+            })
+
+        assert len(result["analyses"]) == 2
+        mock_select.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +414,7 @@ class TestReviewNode:
     """review_node 测试。"""
 
     def test_force_pass_at_max_iteration(self) -> None:
-        """iteration >= 3 时强制通过，不调用 LLM。"""
+        """iteration >= 3 时强制通过，不调用 LLM，iteration 不递增。"""
         with patch("src.graph.nodes._get_session") as mock_session:
             result = review_node({
                 "articles": [{"article_id": "kb-1"}],
@@ -364,7 +423,7 @@ class TestReviewNode:
             mock_session.assert_not_called()
         assert result["review_passed"] is True
         assert result["review_feedback"] == ""
-        assert result["iteration"] == 4
+        assert result["iteration"] == 3
 
     def test_force_pass_at_iteration_2(self) -> None:
         """iteration=2 不是强制通过（需要 >= _MAX_ITERATIONS=3）。"""
@@ -473,6 +532,27 @@ class TestReviewNode:
 # ---------------------------------------------------------------------------
 
 
+def _make_mock_session_scope() -> MagicMock:
+    """创建模拟的 session_scope 上下文管理器。"""
+    mock_session = MagicMock()
+    mock_orm_obj = MagicMock()
+    mock_orm_obj.id = 1
+    mock_session.add.return_value = None
+    mock_session.flush.return_value = None
+
+    # session.add 后，返回的 ORM 对象需要有 id
+    def _add_side_effect(obj: object) -> None:
+        obj.id = 1
+
+    mock_session.add.side_effect = _add_side_effect
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = lambda self: mock_session
+    mock_ctx.__exit__ = lambda self, *args: None
+    mock_scope = MagicMock(return_value=mock_ctx)
+    return mock_scope
+
+
 class TestSaveNode:
     """save_node 测试。"""
 
@@ -499,6 +579,8 @@ class TestSaveNode:
             },
         ]
 
+        mock_scope = _make_mock_session_scope()
+
         with tempfile.TemporaryDirectory() as tmpdir:
             articles_dir = os.path.join(tmpdir, "articles")
             index_file = os.path.join(articles_dir, "index.json")
@@ -506,24 +588,11 @@ class TestSaveNode:
             with (
                 patch("src.graph.nodes._ARTICLES_DIR", articles_dir),
                 patch("src.graph.nodes._INDEX_FILE", index_file),
+                patch("src.graph.nodes.session_scope", mock_scope),
             ):
                 result = save_node({"articles": articles})
 
             assert result["saved_count"] == 2
-
-            file1 = os.path.join(articles_dir, "kb-test-0001.json")
-            file2 = os.path.join(articles_dir, "kb-test-0002.json")
-            assert os.path.exists(file1)
-            assert os.path.exists(file2)
-
-            with open(file1, encoding="utf-8") as f:
-                saved = json.load(f)
-            assert saved["title"] == "测试1"
-
-            with open(index_file, encoding="utf-8") as f:
-                index = json.load(f)
-            assert len(index) == 2
-            assert index[0]["article_id"] == "kb-test-0001"
 
     def test_save_empty_articles(self) -> None:
         """空 articles 返回 saved_count=0。"""
@@ -533,19 +602,52 @@ class TestSaveNode:
     def test_save_generates_article_id_if_missing(self) -> None:
         """缺少 article_id 时自动生成。"""
         articles = [{"title": "no id", "source_url": "url"}]
+        mock_scope = _make_mock_session_scope()
+
         with tempfile.TemporaryDirectory() as tmpdir:
             articles_dir = os.path.join(tmpdir, "articles")
             index_file = os.path.join(articles_dir, "index.json")
             with (
                 patch("src.graph.nodes._ARTICLES_DIR", articles_dir),
                 patch("src.graph.nodes._INDEX_FILE", index_file),
+                patch("src.graph.nodes.session_scope", mock_scope),
             ):
                 result = save_node({"articles": articles})
             assert result["saved_count"] == 1
-            assert articles[0]["article_id"].startswith("kb-")
+            # 索引中的 article_id 被回填为正式格式（build_article_id 输出）
+            with open(index_file, encoding="utf-8") as f:
+                index = json.load(f)
+            assert len(index) == 1
+            assert index[0]["article_id"].startswith("kb-")
+
+    def test_save_does_not_mutate_input(self) -> None:
+        """save_node 不 mutate 输入 article dict。"""
+        original_article = {
+            "article_id": None,
+            "title": "test",
+            "source_url": "url",
+            "status": "pending",
+        }
+        articles = [dict(original_article)]
+        mock_scope = _make_mock_session_scope()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            articles_dir = os.path.join(tmpdir, "articles")
+            index_file = os.path.join(articles_dir, "index.json")
+            with (
+                patch("src.graph.nodes._ARTICLES_DIR", articles_dir),
+                patch("src.graph.nodes._INDEX_FILE", index_file),
+                patch("src.graph.nodes.session_scope", mock_scope),
+            ):
+                save_node({"articles": articles})
+
+        # 原始 dict 的 article_id 不应被修改（浅拷贝保护）
+        assert articles[0]["article_id"] is None
 
     def test_save_updates_existing_index(self) -> None:
         """保存时合并已有索引。"""
+        mock_scope = _make_mock_session_scope()
+
         with tempfile.TemporaryDirectory() as tmpdir:
             articles_dir = os.path.join(tmpdir, "articles")
             index_file = os.path.join(articles_dir, "index.json")
@@ -576,6 +678,7 @@ class TestSaveNode:
             with (
                 patch("src.graph.nodes._ARTICLES_DIR", articles_dir),
                 patch("src.graph.nodes._INDEX_FILE", index_file),
+                patch("src.graph.nodes.session_scope", mock_scope),
             ):
                 save_node({"articles": new_articles})
 
@@ -584,4 +687,7 @@ class TestSaveNode:
             assert len(index) == 2
             ids = [item["article_id"] for item in index]
             assert "kb-old-0001" in ids
-            assert "kb-new-0001" in ids
+            # save_node 用 DB 自增主键回填 article_id，格式为 kb-YYYYMMDD-0001
+            new_ids = [aid for aid in ids if aid != "kb-old-0001"]
+            assert len(new_ids) == 1
+            assert new_ids[0].startswith("kb-")

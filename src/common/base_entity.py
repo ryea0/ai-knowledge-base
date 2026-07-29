@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import BigInteger, DateTime, Integer
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -39,6 +39,11 @@ class Base(DeclarativeBase):
     pass
 
 
+def _utc_now() -> datetime:
+    """返回当前 UTC naive datetime（替代废弃的 ``datetime.utcnow``）。"""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class BaseEntity(Base):
     """通用业务实体基类。
 
@@ -52,9 +57,9 @@ class BaseEntity(Base):
 
     时间字段说明：
         - ``created_at``: 数据库层 ``DEFAULT CURRENT_TIMESTAMP(3)`` 自动填充，
-          Python 层 ``default=datetime.utcnow`` 作为 ORM flush 时的回退值。
+          Python 层 ``default=_utc_now`` 作为 ORM flush 时的回退值。
         - ``updated_at``: 数据库层 ``ON UPDATE CURRENT_TIMESTAMP(3)`` 自动更新，
-          Python 层 ``onupdate=datetime.utcnow`` 作为 ORM flush 时的回退值。
+          Python 层 ``onupdate=_utc_now`` 作为 ORM flush 时的回退值。
 
     Attributes:
         id: 自增主键，``BIGINT UNSIGNED``。
@@ -72,13 +77,13 @@ class BaseEntity(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         nullable=False,
-        default=datetime.utcnow,
+        default=_utc_now,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=_utc_now,
+        onupdate=_utc_now,
     )
     is_deleted: Mapped[bool] = mapped_column(
         Integer, nullable=False, default=False

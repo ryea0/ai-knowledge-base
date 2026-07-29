@@ -10,6 +10,6 @@
 """
 
 from src.graph.graph import build_graph
-from src.graph.state import KBState, WorkflowState
+from src.graph.state import KBState
 
-__all__ = ["KBState", "WorkflowState", "build_graph"]
+__all__ = ["KBState", "build_graph"]

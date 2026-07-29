@@ -5,6 +5,7 @@
 - build_graph 编译后的图可执行（mock 节点）
 - 审核通过路径（review -> save -> END）
 - 审核不通过路径（review -> organize 循环）
+- iteration 安全网路由（iteration >= 3 时强制走向 save）
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ class TestKBStateStructure:
     def test_state_with_all_fields(self) -> None:
         """KBState 可以包含所有字段。"""
         state: KBState = {
+            "trace_id": "a1b2c3d4",
             "sources": [{"title": "test"}],
             "analyses": [{"summary": "test"}],
             "articles": [{"article_id": "kb-20260728-0001"}],
@@ -33,9 +35,11 @@ class TestKBStateStructure:
             "review_passed": False,
             "iteration": 1,
             "cost_tracker": {},
+            "errors": [],
         }
         assert state["review_passed"] is False
         assert len(state["sources"]) == 1
+        assert state["trace_id"] == "a1b2c3d4"
 
 
 class TestBuildGraph:
@@ -112,3 +116,30 @@ class TestBuildGraph:
             assert call_count["review"] == 2
             assert result["review_passed"] is True
             assert result["saved_count"] == 1
+
+    def test_graph_iteration_safety_net(self) -> None:
+        """iteration >= 3 时即使 review 未通过也强制走向 save。"""
+        with (
+            patch("src.graph.graph.collect_node") as mock_collect,
+            patch("src.graph.graph.analyze_node") as mock_analyze,
+            patch("src.graph.graph.organize_node") as mock_organize,
+            patch("src.graph.graph.review_node") as mock_review,
+            patch("src.graph.graph.save_node") as mock_save,
+        ):
+            mock_collect.return_value = {"sources": [{"title": "t"}]}
+            mock_analyze.return_value = {"analyses": [{"title": "t"}]}
+            mock_organize.return_value = {"articles": [{"article_id": "kb-1"}]}
+            # review 未通过但 iteration 达到上限
+            mock_review.return_value = {
+                "review_passed": False,
+                "review_feedback": "仍需改进",
+                "iteration": 3,
+            }
+            mock_save.return_value = {"saved_count": 1}
+
+            app = build_graph()
+            result = app.invoke({})
+
+            assert result["review_passed"] is False
+            assert result["saved_count"] == 1
+            mock_save.assert_called_once()

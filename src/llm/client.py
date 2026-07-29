@@ -36,7 +36,8 @@ from src.llm.utils import sanitize_secrets
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-    from src.llm.budget import BudgetConfig
+    from src.llm.budget import BudgetConfig, BudgetGuard
+    from src.llm.cost import CostEstimate, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +99,31 @@ class LlmCallError(Exception):
 
 
 class RetryStrategy:
-    """重试策略基类（策略模式接口）。
+    """重试策略（数据驱动配置，替代策略模式子类层级）。
 
-    子类通过覆写 :meth:`should_retry` / :meth:`max_attempts` /
-    :meth:`backoff_seconds` 定义不同错误类型的重试行为。
+    通过 ``max_attempts`` / ``backoff_base`` / ``backoff_factor`` 三个参数
+    覆盖原 ``TimeoutRetryStrategy`` / ``RateLimitRetryStrategy`` 等子类的行为，
+    退避公式: ``delay = backoff_base * (backoff_factor ** (attempt - 1))``。
     """
+
+    __slots__ = ("max_attempts", "backoff_base", "backoff_factor")
+
+    def __init__(
+        self,
+        max_attempts: int = 0,
+        backoff_base: float = 0.0,
+        backoff_factor: float = 2.0,
+    ) -> None:
+        """初始化重试策略。
+
+        Args:
+            max_attempts: 最大重试次数（不含首次调用），0 表示不重试。
+            backoff_base: 首次退避秒数。
+            backoff_factor: 退避倍率。
+        """
+        self.max_attempts = max_attempts
+        self.backoff_base = backoff_base
+        self.backoff_factor = backoff_factor
 
     def should_retry(self, attempt: int) -> bool:
         """判断当前重试次数下是否应继续重试。
@@ -113,11 +134,7 @@ class RetryStrategy:
         Returns:
             True 表示应重试。
         """
-        return attempt < self.max_attempts()
-
-    def max_attempts(self) -> int:
-        """最大重试次数（不含首次调用）。"""
-        return 0
+        return attempt < self.max_attempts
 
     def backoff_seconds(self, attempt: int) -> float:
         """计算第 attempt 次重试前的等待时间（秒）。
@@ -128,78 +145,40 @@ class RetryStrategy:
         Returns:
             等待秒数。
         """
-        return 0.0
+        return self.backoff_base * (self.backoff_factor ** (attempt - 1))
 
 
-class NoRetryStrategy(RetryStrategy):
-    """不可重试策略（鉴权失败 / 客户端错误 / 未知异常）。"""
+# 不可重试策略（鉴权失败 / 客户端错误 / 未知异常）
+NoRetryStrategy = RetryStrategy(max_attempts=0)
 
-    def max_attempts(self) -> int:
-        return 0
+# 超时重试策略 -- 指数退避，最多 3 次。退避: 1s -> 2s -> 4s
+TimeoutRetryStrategy = RetryStrategy(max_attempts=3, backoff_base=1.0, backoff_factor=2.0)
 
-    def should_retry(self, attempt: int) -> bool:
-        return False
+# 限流重试策略 -- 指数退避 + 基础延迟，最多 3 次。退避: 5s -> 10s -> 20s
+RateLimitRetryStrategy = RetryStrategy(max_attempts=3, backoff_base=5.0, backoff_factor=2.0)
 
+# 网络异常重试策略 -- 线性退避，最多 2 次。退避: 1s -> 2s
+NetworkRetryStrategy = RetryStrategy(max_attempts=2, backoff_base=1.0, backoff_factor=2.0)
 
-class TimeoutRetryStrategy(RetryStrategy):
-    """超时重试策略 -- 指数退避，最多 3 次。
-
-    退避: 1s -> 2s -> 4s
-    """
-
-    def max_attempts(self) -> int:
-        return 3
-
-    def backoff_seconds(self, attempt: int) -> float:
-        return float(2 ** (attempt - 1))
-
-
-class RateLimitRetryStrategy(RetryStrategy):
-    """限流重试策略 -- 指数退避 + 基础延迟，最多 3 次。
-
-    退避: 5s -> 10s -> 20s（限流需更长等待）
-    """
-
-    def max_attempts(self) -> int:
-        return 3
-
-    def backoff_seconds(self, attempt: int) -> float:
-        return 5.0 * float(2 ** (attempt - 1))
-
-
-class NetworkRetryStrategy(RetryStrategy):
-    """网络异常重试策略 -- 短退避，最多 2 次。
-
-    退避: 1s -> 2s
-    """
-
-    def max_attempts(self) -> int:
-        return 2
-
-    def backoff_seconds(self, attempt: int) -> float:
-        return float(attempt)
-
-
-class ServerErrorRetryStrategy(RetryStrategy):
-    """服务端 5xx 重试策略 -- 指数退避，最多 2 次。
-
-    退避: 2s -> 4s
-    """
-
-    def max_attempts(self) -> int:
-        return 2
-
-    def backoff_seconds(self, attempt: int) -> float:
-        return 2.0 * float(2 ** (attempt - 1))
+# 服务端 5xx 重试策略 -- 指数退避，最多 2 次。退避: 2s -> 4s
+ServerErrorRetryStrategy = RetryStrategy(max_attempts=2, backoff_base=2.0, backoff_factor=2.0)
 
 
 class RetryPolicyFactory:
     """重试策略工厂 -- 根据错误类型返回对应策略。
 
-    使用缓存避免重复创建策略实例。
+    策略实例为模块级单例，无需缓存。
     """
 
-    _strategies: dict[LlmErrorType, RetryStrategy] = {}
+    _strategies: dict[LlmErrorType, RetryStrategy] = {
+        LlmErrorType.TIMEOUT: TimeoutRetryStrategy,
+        LlmErrorType.AUTH_FAILED: NoRetryStrategy,
+        LlmErrorType.RATE_LIMITED: RateLimitRetryStrategy,
+        LlmErrorType.NETWORK: NetworkRetryStrategy,
+        LlmErrorType.SERVER_ERROR: ServerErrorRetryStrategy,
+        LlmErrorType.CLIENT_ERROR: NoRetryStrategy,
+        LlmErrorType.UNKNOWN: NoRetryStrategy,
+    }
 
     @classmethod
     def get_strategy(cls, error_type: LlmErrorType) -> RetryStrategy:
@@ -211,17 +190,7 @@ class RetryPolicyFactory:
         Returns:
             对应的重试策略实例。
         """
-        if not cls._strategies:
-            cls._strategies = {
-                LlmErrorType.TIMEOUT: TimeoutRetryStrategy(),
-                LlmErrorType.AUTH_FAILED: NoRetryStrategy(),
-                LlmErrorType.RATE_LIMITED: RateLimitRetryStrategy(),
-                LlmErrorType.NETWORK: NetworkRetryStrategy(),
-                LlmErrorType.SERVER_ERROR: ServerErrorRetryStrategy(),
-                LlmErrorType.CLIENT_ERROR: NoRetryStrategy(),
-                LlmErrorType.UNKNOWN: NoRetryStrategy(),
-            }
-        return cls._strategies.get(error_type, NoRetryStrategy())
+        return cls._strategies.get(error_type, NoRetryStrategy)
 
 
 def chat_completion(
@@ -295,17 +264,21 @@ def chat_completion(
     )
 
     # 预算控制：调用前检查每日上限
+    budget_guard: BudgetGuard | None = None
     if session is not None:
         from src.config.settings import get_settings
-        from src.llm.budget import BudgetGuard
 
         settings = get_settings()
-        if any([
-            settings.budget.daily_limit_cny,
-            settings.budget.daily_limit_usd,
-        ]):
-            guard = BudgetGuard(session, _budget_config_from_settings(settings))
-            guard.check_pre_call(model)
+        if any(
+            (
+                settings.budget.daily_limit_cny,
+                settings.budget.daily_limit_usd,
+            )
+        ):
+            from src.llm.budget import BudgetGuard
+
+            budget_guard = BudgetGuard(session, _budget_config_from_settings(settings))
+            budget_guard.check_pre_call(model)
 
     start = time.monotonic()
     try:
@@ -323,19 +296,10 @@ def chat_completion(
             sanitized,
         )
         if session is not None:
-            from src.llm.health import record_failure
-            from src.llm.log_call import write_call_log
-
-            record_failure(
+            _on_call_complete(
                 session,
-                provider_id=provider.id,
-                model_id=model.id,
-                error_msg=sanitized,
-            )
-            write_call_log(
-                session,
-                provider_id=provider.id,
-                model_id=model.id,
+                provider,
+                model,
                 is_success=False,
                 latency_ms=latency_ms,
                 error_msg=sanitized,
@@ -357,19 +321,10 @@ def chat_completion(
 
     if stream:
         if session is not None:
-            from src.llm.health import record_success
-            from src.llm.log_call import write_call_log
-
-            record_success(
+            _on_call_complete(
                 session,
-                provider_id=provider.id,
-                model_id=model.id,
-                latency_ms=latency_ms,
-            )
-            write_call_log(
-                session,
-                provider_id=provider.id,
-                model_id=model.id,
+                provider,
+                model,
                 is_success=True,
                 latency_ms=latency_ms,
             )
@@ -383,39 +338,19 @@ def chat_completion(
     )
 
     if session is not None:
-        from src.llm.health import record_success
-        from src.llm.log_call import write_call_log
-
-        record_success(
+        _on_call_complete(
             session,
-            provider_id=provider.id,
-            model_id=model.id,
-            latency_ms=latency_ms,
-        )
-        write_call_log(
-            session,
-            provider_id=provider.id,
-            model_id=model.id,
+            provider,
+            model,
             is_success=True,
+            latency_ms=latency_ms,
             usage=llm_response.usage,
             cost=llm_response.cost,
-            latency_ms=latency_ms,
         )
 
         # 预算控制：调用后检查单次上限 + 每日累计
-        from src.config.settings import get_settings
-
-        settings = get_settings()
-        if any([
-            settings.budget.daily_limit_cny,
-            settings.budget.daily_limit_usd,
-            settings.budget.per_call_limit_cny,
-            settings.budget.per_call_limit_usd,
-        ]):
-            from src.llm.budget import BudgetGuard
-
-            guard = BudgetGuard(session, _budget_config_from_settings(settings))
-            guard.check_post_call(llm_response.cost)
+        if budget_guard is not None:
+            budget_guard.check_post_call(llm_response.cost)
 
     return llm_response
 
@@ -436,7 +371,7 @@ def chat_completion_with_retry(
     在 :func:`chat_completion` 基础上增加基于 :class:`RetryStrategy` 的重试逻辑。
     重试策略由 :class:`RetryPolicyFactory` 根据异常的 ``error_type`` 自动选择。
 
-    重试上限取 ``min(strategy.max_attempts(), provider.max_retries)``，
+    重试上限取 ``min(strategy.max_attempts, provider.max_retries)``，
     避免某策略的重试次数超过供应商配置的上限。
 
     Args:
@@ -475,7 +410,7 @@ def chat_completion_with_retry(
         except LlmCallError as exc:
             attempt += 1
             strategy = RetryPolicyFactory.get_strategy(exc.error_type)
-            effective_max = min(strategy.max_attempts(), provider.max_retries)
+            effective_max = min(strategy.max_attempts, provider.max_retries)
 
             if not strategy.should_retry(attempt) or attempt > effective_max:
                 logger.warning(
@@ -501,6 +436,61 @@ def chat_completion_with_retry(
                 backoff,
             )
             time.sleep(backoff)
+
+
+def _on_call_complete(
+    session: Session,
+    provider: LlmProvider,
+    model: LlmModel,
+    *,
+    is_success: bool,
+    latency_ms: int,
+    usage: TokenUsage | None = None,
+    cost: CostEstimate | None = None,
+    error_msg: str | None = None,
+) -> None:
+    """LLM 调用完成后的统一后处理：更新健康状态 + 写入调用日志。
+
+    消除 ``chat_completion`` 中 stream / 非 stream / 失败路径的重复代码。
+
+    Args:
+        session: SQLAlchemy Session。
+        provider: 供应商 ORM 对象。
+        model: 模型 ORM 对象。
+        is_success: 调用是否成功。
+        latency_ms: 响应延迟毫秒。
+        usage: Token 用量（成功且非 stream 时传入）。
+        cost: 成本估算（成功且非 stream 时传入）。
+        error_msg: 失败原因（脱敏后，失败时传入）。
+    """
+    from src.llm.health import record_failure, record_success
+    from src.llm.log_call import write_call_log
+
+    if is_success:
+        record_success(
+            session,
+            provider_id=provider.id,
+            model_id=model.id,
+            latency_ms=latency_ms,
+        )
+    else:
+        record_failure(
+            session,
+            provider_id=provider.id,
+            model_id=model.id,
+            error_msg=error_msg or "",
+        )
+
+    write_call_log(
+        session,
+        provider_id=provider.id,
+        model_id=model.id,
+        is_success=is_success,
+        latency_ms=latency_ms,
+        usage=usage,
+        cost=cost,
+        error_msg=error_msg,
+    )
 
 
 def _budget_config_from_settings(settings: Any) -> BudgetConfig:
@@ -541,18 +531,18 @@ def _classify_exception(exc: Exception) -> LlmErrorType:
         对应的 :class:`LlmErrorType` 枚举值。
     """
     # 按精确度从高到低匹配（子类在前）
-    exc_name = type(exc).__name__
+    # _is_instance 遍历 MRO 检查类名，无需再额外比对 exc_name
 
     # 超时 -- Timeout 是 litellm.exceptions.Timeout
-    if _is_instance(exc, "Timeout") or exc_name == "Timeout":
+    if _is_instance(exc, "Timeout"):
         return LlmErrorType.TIMEOUT
 
     # 鉴权失败
-    if _is_instance(exc, "AuthenticationError") or exc_name == "AuthenticationError":
+    if _is_instance(exc, "AuthenticationError"):
         return LlmErrorType.AUTH_FAILED
 
     # 限流
-    if _is_instance(exc, "RateLimitError") or exc_name == "RateLimitError":
+    if _is_instance(exc, "RateLimitError"):
         return LlmErrorType.RATE_LIMITED
 
     # 服务端 5xx
@@ -560,12 +550,11 @@ def _classify_exception(exc: Exception) -> LlmErrorType:
         _is_instance(exc, "InternalServerError")
         or _is_instance(exc, "ServiceUnavailableError")
         or _is_instance(exc, "BadGatewayError")
-        or exc_name in ("InternalServerError", "ServiceUnavailableError", "BadGatewayError")
     ):
         return LlmErrorType.SERVER_ERROR
 
     # 网络连接异常（排除已匹配的 Timeout）
-    if _is_instance(exc, "APIConnectionError") or exc_name == "APIConnectionError":
+    if _is_instance(exc, "APIConnectionError"):
         return LlmErrorType.NETWORK
 
     # 客户端 4xx（非鉴权/限流）
@@ -573,7 +562,6 @@ def _classify_exception(exc: Exception) -> LlmErrorType:
         _is_instance(exc, "BadRequestError")
         or _is_instance(exc, "NotFoundError")
         or _is_instance(exc, "PermissionDeniedError")
-        or exc_name in ("BadRequestError", "NotFoundError", "PermissionDeniedError")
     ):
         return LlmErrorType.CLIENT_ERROR
 
