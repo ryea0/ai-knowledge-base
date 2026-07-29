@@ -1,0 +1,23 @@
+{
+  "article_id": "kb-20260729-8613b6db",
+  "title": "NTT DATA Group cuts incident analysis to 30 minutes with Codex",
+  "source_url": "https://openai.com/index/ntt-data",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "NTT DATA Group uses ChatGPT Enterprise and Codex to help 9,000 employees automate work, cut incident analysis to 30 minutes, and scale secure AI adopt",
+  "content_path": "knowledge/raw/kb-20260729-8613b6db.md",
+  "tags": [
+    "ai",
+    "llm",
+    "news"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-29T06:24:38Z",
+  "analyzed_at": "2026-07-29T06:24:55Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [],
+  "score": 5
+}
