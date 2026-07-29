@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS kb_llm_model (
     supports_function_calling TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否支持函数调用',
     supports_vision           TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否支持视觉/多模态',
     supports_reasoning        TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否为推理模型（content 空 / reasoning_content / thinking_blocks）',
+    task_type                 JSON             NULL                    COMMENT '任务类型数组，如 ["TextGeneration"]、["VisualQuestionAnswering"]',
     input_price_per_1m        DECIMAL(10,4)    NOT NULL DEFAULT 0.0000 COMMENT '输入每百万 token 价格 USD，local=0',
     output_price_per_1m       DECIMAL(10,4)    NOT NULL DEFAULT 0.0000 COMMENT '输出每百万 token 价格 USD，local=0',
     is_enabled                TINYINT(1) UNSIGNED NOT NULL DEFAULT 1   COMMENT '是否启用',

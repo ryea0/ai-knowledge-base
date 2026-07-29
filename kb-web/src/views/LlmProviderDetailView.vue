@@ -10,6 +10,7 @@ import {
   createModel,
   updateModel,
   deleteModel,
+  batchDeleteModels,
   discoverModels,
   resetModelHealth,
   type ProviderDetail,
@@ -28,6 +29,7 @@ const providerId = Number(route.params.id)
 const loading = ref(false)
 const detail = ref<ProviderDetail | null>(null)
 const activeTab = ref('info')
+const modelsTableKey = ref(0)
 
 // Connectivity
 const connectivityLoading = ref(false)
@@ -39,6 +41,11 @@ const modelDialogTitle = ref('')
 const modelLoading = ref(false)
 const editingModelId = ref<number | null>(null)
 const modelForm = ref<ModelCreatePayload & ModelUpdatePayload>(defaultModelForm())
+
+// Batch delete
+const selectedModels = ref<LlmModel[]>([])
+const batchDeleteLoading = ref(false)
+const modelsTableRef = ref()
 
 // Discovery
 const discoverLoading = ref(false)
@@ -59,6 +66,8 @@ function defaultModelForm() {
     supports_streaming: true,
     supports_function_calling: false,
     supports_vision: false,
+    supports_reasoning: false,
+    task_type: null as string[] | null,
     input_price_per_1m: 0,
     output_price_per_1m: 0,
     is_enabled: true,
@@ -113,6 +122,7 @@ async function loadDetail(): Promise<void> {
   loading.value = true
   try {
     detail.value = await getProviderDetail(providerId)
+    modelsTableKey.value++
   } finally {
     loading.value = false
   }
@@ -201,6 +211,8 @@ function openEditModelDialog(model: LlmModel): void {
     supports_streaming: model.supports_streaming,
     supports_function_calling: model.supports_function_calling,
     supports_vision: model.supports_vision,
+    supports_reasoning: model.supports_reasoning,
+    task_type: model.task_type,
     input_price_per_1m: model.input_price_per_1m,
     output_price_per_1m: model.output_price_per_1m,
     is_enabled: model.is_enabled,
@@ -262,6 +274,35 @@ async function handleDeleteModel(model: LlmModel): Promise<void> {
   }
 }
 
+function handleModelSelectionChange(selection: LlmModel[]): void {
+  selectedModels.value = selection
+}
+
+async function handleBatchDeleteModels(): Promise<void> {
+  if (selectedModels.value.length === 0) {
+    ElMessage.warning({ message: '请先勾选要删除的模型', duration: 5000 })
+    return
+  }
+  const ids = selectedModels.value.map((m) => m.id)
+  try {
+    await ElMessageBox.confirm(
+      `确定批量删除选中的 ${ids.length} 个模型？`,
+      '批量删除确认',
+      { type: 'warning' },
+    )
+    batchDeleteLoading.value = true
+    const count = await batchDeleteModels(ids)
+    ElMessage.success({ message: `已删除 ${count} 个模型`, duration: 5000 })
+    selectedModels.value = []
+    modelsTableRef.value?.clearSelection()
+    await loadDetail()
+  } catch {
+    // Cancelled or error
+  } finally {
+    batchDeleteLoading.value = false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Model Discovery
 // ---------------------------------------------------------------------------
@@ -307,6 +348,8 @@ async function handleBatchImport(): Promise<void> {
         supports_streaming: m.supports_streaming,
         supports_function_calling: m.supports_function_calling,
         supports_vision: m.supports_vision,
+        supports_reasoning: m.supports_reasoning,
+        task_type: m.task_type,
         input_price_per_1m: m.input_price_per_1m,
         output_price_per_1m: m.output_price_per_1m,
         is_enabled: true,
@@ -425,17 +468,45 @@ onMounted(() => {
         <el-tab-pane label="模型管理" name="models">
           <div style="margin-bottom: 12px;">
             <el-button type="primary" @click="openCreateModelDialog">新增模型</el-button>
+            <el-button
+              type="danger"
+              :loading="batchDeleteLoading"
+              :disabled="selectedModels.length === 0"
+              @click="handleBatchDeleteModels"
+            >
+              批量删除 ({{ selectedModels.length }})
+            </el-button>
           </div>
 
-          <el-table :data="models" stripe>
+          <el-table
+            ref="modelsTableRef"
+            :key="modelsTableKey"
+            :data="models"
+            stripe
+            @selection-change="handleModelSelectionChange"
+          >
+            <el-table-column type="selection" width="45" />
             <el-table-column prop="model_code" label="模型代码" width="180" />
             <el-table-column prop="litellm_model" label="LiteLLM 标识" width="200" show-overflow-tooltip />
             <el-table-column prop="display_name" label="名称" width="150" />
             <el-table-column prop="context_window" label="上下文" width="100" align="center" />
-            <el-table-column label="能力" width="120" align="center">
+            <el-table-column label="能力" width="180" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.supports_function_calling" size="small" style="margin-right: 4px;">FC</el-tag>
-                <el-tag v-if="row.supports_vision" size="small" type="success">Vision</el-tag>
+                <el-tag v-if="row.supports_vision" size="small" type="success" style="margin-right: 4px;">Vision</el-tag>
+                <el-tag v-if="row.supports_reasoning" size="small" type="danger" style="margin-right: 4px;">Reasoning</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="任务类型" width="180" align="center">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="tt in (row.task_type || [])"
+                  :key="tt"
+                  size="small"
+                  type="info"
+                  style="margin-right: 4px; margin-bottom: 2px;"
+                >{{ tt }}</el-tag>
+                <span v-if="!row.task_type || row.task_type.length === 0">-</span>
               </template>
             </el-table-column>
             <el-table-column prop="input_price_per_1m" label="输入价格" width="100" align="center">
@@ -516,6 +587,27 @@ onMounted(() => {
               <el-form-item label="多模态">
                 <el-switch v-model="modelForm.supports_vision" />
               </el-form-item>
+              <el-form-item label="推理模型">
+                <el-switch v-model="modelForm.supports_reasoning" />
+              </el-form-item>
+              <el-form-item label="任务类型">
+                <el-select
+                  v-model="modelForm.task_type"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  placeholder="如 TextGeneration"
+                  style="width: 100%;"
+                >
+                  <el-option label="TextGeneration" value="TextGeneration" />
+                  <el-option label="VisualQuestionAnswering" value="VisualQuestionAnswering" />
+                  <el-option label="TextEmbedding" value="TextEmbedding" />
+                  <el-option label="SpeechToText" value="SpeechToText" />
+                  <el-option label="TextToImage" value="TextToImage" />
+                  <el-option label="TextToVideo" value="TextToVideo" />
+                </el-select>
+              </el-form-item>
               <el-form-item label="输入价格/M">
                 <el-input-number v-model="modelForm.input_price_per_1m" :min="0" :precision="4" />
               </el-form-item>
@@ -570,10 +662,23 @@ onMounted(() => {
             <el-table-column prop="litellm_model" label="LiteLLM 标识" width="250" show-overflow-tooltip />
             <el-table-column prop="display_name" label="名称" width="150" />
             <el-table-column prop="context_window" label="上下文" width="100" align="center" />
-            <el-table-column label="能力" width="120" align="center">
+            <el-table-column label="能力" width="180" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.supports_function_calling" size="small" style="margin-right: 4px;">FC</el-tag>
-                <el-tag v-if="row.supports_vision" size="small" type="success">Vision</el-tag>
+                <el-tag v-if="row.supports_vision" size="small" type="success" style="margin-right: 4px;">Vision</el-tag>
+                <el-tag v-if="row.supports_reasoning" size="small" type="danger" style="margin-right: 4px;">Reasoning</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="任务类型" width="180" align="center">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="tt in (row.task_type || [])"
+                  :key="tt"
+                  size="small"
+                  type="info"
+                  style="margin-right: 4px; margin-bottom: 2px;"
+                >{{ tt }}</el-tag>
+                <span v-if="!row.task_type || row.task_type.length === 0">-</span>
               </template>
             </el-table-column>
             <el-table-column label="状态" width="100" align="center">

@@ -44,6 +44,8 @@ export interface LlmModel {
   supports_streaming: boolean
   supports_function_calling: boolean
   supports_vision: boolean
+  supports_reasoning: boolean
+  task_type: string[] | null
   input_price_per_1m: number
   output_price_per_1m: number
   is_enabled: boolean
@@ -83,6 +85,8 @@ export interface DiscoveredModel {
   supports_streaming: boolean
   supports_function_calling: boolean
   supports_vision: boolean
+  supports_reasoning: boolean
+  task_type: string[] | null
   input_price_per_1m: number
   output_price_per_1m: number
   already_exists: boolean
@@ -156,6 +160,8 @@ export interface ModelCreatePayload {
   supports_streaming?: boolean
   supports_function_calling?: boolean
   supports_vision?: boolean
+  supports_reasoning?: boolean
+  task_type?: string[] | null
   input_price_per_1m?: number
   output_price_per_1m?: number
   is_enabled?: boolean
@@ -171,6 +177,8 @@ export interface ModelUpdatePayload {
   supports_streaming?: boolean
   supports_function_calling?: boolean
   supports_vision?: boolean
+  supports_reasoning?: boolean
+  task_type?: string[] | null
   input_price_per_1m?: number
   output_price_per_1m?: number
   is_enabled?: boolean
@@ -234,6 +242,10 @@ export function updateModel(modelId: number, data: ModelUpdatePayload) {
 
 export function deleteModel(modelId: number) {
   return del<void>(`/llm/models/${modelId}`)
+}
+
+export function batchDeleteModels(modelIds: number[]) {
+  return post<number>('/llm/models/batch-delete', modelIds)
 }
 
 // ---------------------------------------------------------------------------

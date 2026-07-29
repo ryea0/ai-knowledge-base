@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Numeric, String
+from sqlalchemy import JSON, DateTime, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.common.base_entity import Base, BaseEntity
@@ -106,6 +106,8 @@ class LlmModel(BaseEntity):
         supports_vision: 是否支持视觉/多模态。
         supports_reasoning: 是否为推理模型（回复在 reasoning_content
             或 thinking_blocks 而非 content）。
+        task_type: 任务类型数组，如 ``["TextGeneration"]``、
+            ``["VisualQuestionAnswering"]``，由模型发现时从 API 提取。
         input_price_per_1m: 输入每百万 token 价格 USD。
         output_price_per_1m: 输出每百万 token 价格 USD。
         is_enabled: 是否启用。
@@ -137,6 +139,9 @@ class LlmModel(BaseEntity):
     )
     supports_reasoning: Mapped[bool] = mapped_column(
         Integer, nullable=False, default=False
+    )
+    task_type: Mapped[list[str] | None] = mapped_column(
+        JSON, nullable=True, default=None
     )
     input_price_per_1m: Mapped[float] = mapped_column(
         Numeric(10, 4), nullable=False, default=0.0

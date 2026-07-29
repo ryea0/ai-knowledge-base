@@ -161,6 +161,9 @@ class ModelBase(BaseModel):
     supports_function_calling: bool = Field(False, description="是否支持函数调用")
     supports_vision: bool = Field(False, description="是否支持多模态")
     supports_reasoning: bool = Field(False, description="是否为推理模型")
+    task_type: list[str] | None = Field(
+        None, description="任务类型数组，如 TextGeneration / VisualQuestionAnswering"
+    )
     input_price_per_1m: float = Field(0.0, ge=0, description="输入每百万 token 价格 USD")
     output_price_per_1m: float = Field(0.0, ge=0, description="输出每百万 token 价格 USD")
     is_enabled: bool = Field(True, description="是否启用")
@@ -185,6 +188,7 @@ class ModelUpdate(BaseModel):
     supports_function_calling: bool | None = None
     supports_vision: bool | None = None
     supports_reasoning: bool | None = None
+    task_type: list[str] | None = Field(None, description="任务类型数组，None 表示不修改")
     input_price_per_1m: float | None = Field(None, ge=0)
     output_price_per_1m: float | None = Field(None, ge=0)
     is_enabled: bool | None = None
@@ -208,6 +212,7 @@ class ModelResponse(BaseModel):
     supports_function_calling: bool
     supports_vision: bool
     supports_reasoning: bool
+    task_type: list[str] | None
     input_price_per_1m: float
     output_price_per_1m: float
     is_enabled: bool
@@ -231,6 +236,7 @@ class DiscoveredModel(BaseModel):
     supports_function_calling: bool = Field(False, description="是否支持函数调用")
     supports_vision: bool = Field(False, description="是否支持多模态")
     supports_reasoning: bool = Field(False, description="是否为推理模型")
+    task_type: list[str] | None = Field(None, description="任务类型数组")
     input_price_per_1m: float = Field(0.0, ge=0, description="输入价格，来自 LiteLLM 注册表")
     output_price_per_1m: float = Field(0.0, ge=0, description="输出价格，来自 LiteLLM 注册表")
     already_exists: bool = Field(

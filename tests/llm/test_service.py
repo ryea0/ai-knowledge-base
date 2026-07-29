@@ -24,6 +24,7 @@ from src.llm.schemas import (
 )
 from src.llm.service import (
     _clear_default_model,
+    batch_delete_models,
     create_model,
     create_provider,
     delete_model,
@@ -541,6 +542,87 @@ class TestDeleteModel:
         """删除不存在的抛 ValueError。"""
         with pytest.raises(ValueError, match="不存在"):
             delete_model(session, 99999)
+
+
+class TestBatchDeleteModels:
+    """batch_delete_models 测试。"""
+
+    def test_batch_delete_multiple(self, session: Session) -> None:
+        """批量删除多个模型。"""
+        provider = create_provider(session, _provider_create())
+        m1 = create_model(session, provider.id, _model_create("m1"))
+        m2 = create_model(session, provider.id, _model_create("m2", is_default=False))
+        m3 = create_model(session, provider.id, _model_create("m3", is_default=False))
+
+        count = batch_delete_models(session, [m1.id, m2.id, m3.id])
+        assert count == 3
+
+        for mid in [m1.id, m2.id, m3.id]:
+            model = session.get(LlmModel, mid)
+            assert model is not None
+            assert bool(model.is_deleted) is True
+            assert bool(model.is_enabled) is False
+            assert model.deleted_at is not None
+
+    def test_batch_delete_partial_exist(self, session: Session) -> None:
+        """部分 ID 不存在，只删除存在的。"""
+        provider = create_provider(session, _provider_create())
+        m1 = create_model(session, provider.id, _model_create("m1"))
+
+        count = batch_delete_models(session, [m1.id, 99999, 99998])
+        assert count == 1
+
+        model = session.get(LlmModel, m1.id)
+        assert model is not None
+        assert bool(model.is_deleted) is True
+
+    def test_batch_delete_already_deleted(self, session: Session) -> None:
+        """已软删除的模型不重复删除。"""
+        provider = create_provider(session, _provider_create())
+        m1 = create_model(session, provider.id, _model_create("m1"))
+        delete_model(session, m1.id)
+
+        count = batch_delete_models(session, [m1.id])
+        assert count == 0
+
+    def test_batch_delete_empty_list(self, session: Session) -> None:
+        """空列表返回 0。"""
+        count = batch_delete_models(session, [])
+        assert count == 0
+
+    def test_batch_delete_syncs_health(self, session: Session) -> None:
+        """批量删除时同步软删除健康状态行。"""
+        from src.llm.orm import LlmHealth
+        from src.models.enums import LlmHealthStatus
+
+        provider = create_provider(session, _provider_create())
+        m1 = create_model(session, provider.id, _model_create("m1"))
+        m2 = create_model(session, provider.id, _model_create("m2", is_default=False))
+
+        health1 = LlmHealth(
+            provider_id=provider.id,
+            model_id=m1.id,
+            health_status=LlmHealthStatus.HEALTHY,
+        )
+        health2 = LlmHealth(
+            provider_id=provider.id,
+            model_id=m2.id,
+            health_status=LlmHealthStatus.HEALTHY,
+        )
+        session.add_all([health1, health2])
+        session.flush()
+
+        batch_delete_models(session, [m1.id, m2.id])
+
+        from sqlalchemy import select
+
+        deleted_health = session.execute(
+            select(LlmHealth).where(
+                LlmHealth.model_id.in_([m1.id, m2.id]),
+                LlmHealth.is_deleted == False,  # noqa: E712
+            )
+        ).scalars().all()
+        assert len(deleted_health) == 0
 
 
 class TestClearDefaultModel:

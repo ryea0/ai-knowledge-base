@@ -21,6 +21,16 @@ from src.llm.auth_adapter import AuthContext, build_auth_context, build_httpx_he
 from src.llm.client import LLMResponse, chat_completion, quick_chat
 from src.llm.connectivity import ConnectivityResult, test_connectivity
 from src.llm.cost import CostEstimate, TokenUsage, estimate_cost, extract_usage
+from src.llm.metadata_extractor import (
+    ArkModelMetadataExtractor,
+    LlamaCppModelMetadataExtractor,
+    ModelMetadata,
+    ModelMetadataExtractor,
+    OllamaModelMetadataExtractor,
+    OpenAICompatModelMetadataExtractor,
+    get_metadata_extractor,
+    merge_metadata,
+)
 from src.llm.orm import LlmHealth, LlmModel, LlmProvider
 from src.llm.response_extractor import extract_content
 from src.llm.router import select_first_available
@@ -36,6 +46,7 @@ from src.llm.schemas import (
     ProviderUpdate,
 )
 from src.llm.service import (
+    batch_delete_models,
     create_model,
     create_provider,
     delete_model,
@@ -50,18 +61,24 @@ from src.llm.service import (
 )
 
 __all__ = [
+    "ArkModelMetadataExtractor",
     "AuthContext",
     "ConnectivityResult",
     "CostEstimate",
     "DiscoveredModel",
     "HealthResponse",
     "LLMResponse",
+    "LlamaCppModelMetadataExtractor",
     "LlmHealth",
     "LlmModel",
     "LlmProvider",
+    "ModelMetadata",
+    "ModelMetadataExtractor",
     "ModelCreate",
     "ModelResponse",
     "ModelUpdate",
+    "OpenAICompatModelMetadataExtractor",
+    "OllamaModelMetadataExtractor",
     "ProviderCreate",
     "ProviderDetailResponse",
     "ProviderResponse",
@@ -69,6 +86,7 @@ __all__ = [
     "TokenUsage",
     "build_auth_context",
     "build_httpx_headers",
+    "batch_delete_models",
     "chat_completion",
     "create_model",
     "create_provider",
@@ -78,10 +96,12 @@ __all__ = [
     "estimate_cost",
     "extract_usage",
     "extract_content",
+    "get_metadata_extractor",
     "get_provider",
     "get_provider_detail",
     "list_models",
     "list_providers",
+    "merge_metadata",
     "quick_chat",
     "select_first_available",
     "test_connectivity",

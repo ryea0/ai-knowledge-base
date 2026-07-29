@@ -93,19 +93,23 @@
 | ---- | ---- |
 | 路由 | `/llm/providers/:id` |
 | 组件 | `kb-web/src/views/LlmProviderDetailView.vue`（新增） |
-| API | `GET /llm/providers/:id`、`PATCH /llm/providers/:id`、`GET /llm/providers/:id/models`、`POST /llm/providers/:id/models`、`PATCH /llm/models/:id`、`POST /llm/providers/:id/discover`（模型发现）、`GET /llm/providers/:id/health-logs`（健康日志） |
+| API | `GET /llm/providers/:id`、`PATCH /llm/providers/:id`、`GET /llm/providers/:id/models`、`POST /llm/providers/:id/models`、`PATCH /llm/models/:id`、`POST /llm/providers/:id/discover`（模型发现）、`POST /llm/models/batch-delete`（批量删除模型）、`GET /llm/providers/:id/health-logs`（健康日志） |
 | 布局 | `el-tabs` 多 Tab 页，Tab 切换不离开路由 |
 | 功能 Tab | |
 
 1. **Tab: 供应商信息** - 供应商完整字段展示与编辑（同 §11.5 编辑表单），含 `last_check_at` / `last_success_at` / `last_failure_at` / `consecutive_failures` / `last_error` 只读展示。
 2. **Tab: 模型管理** - 该供应商下所有模型列表（`GET /llm/providers/:id/models`），支持：
-   - 新增模型（对话框表单，字段见 `ModelCreate`）。
-   - 编辑模型（`ModelUpdate`）。
+   - 新增模型（对话框表单，字段见 `ModelCreate`），表单包含：
+     - 推理模型开关（`supports_reasoning`，`el-switch`）。
+     - 任务类型多选（`task_type`，`el-select multiple`，可选项见 §9.4 task_type 枚举）。
+   - 编辑模型（`ModelUpdate`），同表单字段。
    - 启用/禁用模型（`el-switch`）。
    - 设为默认模型（`is_default`，同供应商仅一个默认）。
-   - 列展示：模型代码、LiteLLM 标识、上下文窗口、函数调用/多模态支持、输入/输出价格、来源（preset/discovered/manual）、启用状态、默认标记。
+   - 批量删除：表格首列为 `type="selection"` 多选列，选中后点击「批量删除」按钮调用 `POST /llm/models/batch-delete`（传入 `model_ids: number[]`），成功后清空选择并刷新列表。
+   - 列展示：模型代码、LiteLLM 标识、上下文窗口、能力标签（函数调用 `FC` / 多模态 `Vision` / 推理 `Reasoning` 标签）、任务类型（`task_type` 标签组）、输入/输出价格、来源（preset/discovered/manual）、启用状态、默认标记。
 3. **Tab: 模型发现** - 点击「发现模型」按钮调用 `POST /llm/providers/:id/discover`，返回 `DiscoveredModel[]` 候选列表：
    - 表格展示候选模型，含 `already_exists` 标记（已存在行灰显）。
+   - 列包含：模型代码、上下文窗口、能力标签（FC/Vision/Reasoning）、任务类型（`task_type` 标签组）、输入/输出价格。
    - 用户勾选未存在的模型，点击「批量导入」调用 `POST /llm/providers/:id/models` 批量创建。
    - 未命中 LiteLLM 注册表的字段（如定价、上下文窗口）提示用户补全。
 4. **Tab: 模型健康状态** - 表格展示 `kb_llm_health` 当前状态：
@@ -161,3 +165,4 @@
 5. **敏感信息脱敏**：前端展示 API Key / Token / Webhook URL 时仅显示掩码（如 `sk-****xxxx`），禁止明文展示（AGENTS.md 红线 #10 延伸）。
 6. **Markdown 渲染**：原始内容渲染须使用 Markdown 解析库（如 `markdown-it`），渲染前不做任何内容修改（AGENTS.md 红线 #1 延伸）。
 7. **路由懒加载**：所有页面组件使用 `() => import()` 动态导入，首屏仅加载 Dashboard。
+8. **增删改后刷新表格**：所有对列表数据的增/删/改操作（含批量操作）成功后，必须重新拉取列表数据（调用 `loadXxx()` 函数）以同步 UI 状态。当表格使用 `el-table` 且数据源为 `computed` 时，须在表格上绑定 `:key="tableKey"`，在数据刷新函数中递增 `tableKey`（如 `tableKey.value++`）以强制 `el-table` 重新渲染，避免 Element Plus 内部 DOM diff 不触发更新的问题。

@@ -118,6 +118,7 @@ CREATE TABLE kb_llm_provider (
 | `supports_function_calling` | TINYINT(1) | 0 | 是否支持函数调用 |
 | `supports_vision` | TINYINT(1) | 0 | 是否支持视觉/多模态 |
 | `supports_reasoning` | TINYINT(1) | 0 | 是否为推理模型（详见 §9.7） |
+| `task_type` | JSON | NULL | 任务类型数组，如 `["TextGeneration"]`、`["VisualQuestionAnswering"]`，由模型发现时从供应商 API 提取（详见 §9.4） |
 | `input_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输入每百万 token 价格 USD，local=0 |
 | `output_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输出每百万 token 价格 USD，local=0 |
 | `source` | TINYINT | 0 | 来源 0=preset 1=discovered 2=manual |
@@ -304,6 +305,32 @@ discover_models(provider_id):
   4. 返回候选列表（不直接写 DB，由前端用户勾选后调用 create_model 批量创建）
 ```
 
+### 元数据提取器（策略模式）
+
+不同供应商的 `/models` 响应结构差异较大，通过 `get_metadata_extractor(provider)` 工厂按供应商返回对应的提取器：
+
+| 提取器 | 适用供应商 | 数据来源 | 提取字段 |
+| ------ | ---------- | -------- | -------- |
+| `ArkModelMetadataExtractor` | ark / ark-plan / ark-coding-plan | 内联 `token_limits` / `features` / `modalities` / `task_type` | context_window / max_output_tokens / supports_function_calling / supports_vision / supports_reasoning / task_type |
+| `OllamaModelMetadataExtractor` | ollama | `POST /api/show` 返回 `model_info` + `capabilities` | context_window / supports_function_calling / supports_vision / supports_reasoning / task_type（capabilities 映射） |
+| `LlamaCppModelMetadataExtractor` | llamacpp | `/models` 内联 `meta.n_ctx` | context_window |
+| `OpenAICompatModelMetadataExtractor` | DeepSeek / Qwen 等 | API 仅返回 id / object / owned_by | 全 None（回退 LiteLLM 注册表） |
+
+**ARK 系区分逻辑**：ARK 供应商的 `litellm_provider` 为 `openai`，但 `base_url` 含 `ark`，通过检测 `base_url` 区分。
+
+**Ollama capabilities -> task_type 映射**：
+
+| Ollama capability | task_type |
+| ----------------- | --------- |
+| `completion` | `TextGeneration` |
+| `embedding` | `TextEmbedding` |
+| `vision` | `VisualQuestionAnswering` |
+| `tools` / `thinking` | 归入 `TextGeneration` |
+
+**合并优先级**：`merge_metadata(api_meta, litellm_info)` 按 **API 响应 > LiteLLM 注册表 > 默认值** 合并，`task_type` 仅从 API 提取，LiteLLM 注册表无此字段。
+
+实现见 `src/llm/metadata_extractor.py`。
+
 ### 鉴权
 
 模型发现的 HTTP 请求统一使用 `build_auth_context(provider)` 构造鉴权参数，与 `chat_completion` 共用同一套逻辑。
@@ -402,7 +429,7 @@ print(resp.cost.total_cost_usd)      # 0.000123
 
 - `kb_llm_model.supports_reasoning`（TINYINT(1)，默认 0）标记模型是否为推理模型。
 - `supports_reasoning=True` 时使用 `ReasoningExtractor`，`False` 时使用 `StandardExtractor`。
-- 模型发现（`discover_models`）时从 LiteLLM 注册表的 `supports_reasoning` 布尔值自动填充。
+- 模型发现（`discover_models`）时优先从供应商 API 提取（ARK 的 `max_reasoning_token_length > 0`、Ollama 的 `capabilities` 含 `thinking`），API 无此字段时回退 LiteLLM 注册表的 `supports_reasoning` 布尔值。
 - 手动创建模型时默认为 `False`，可由管理后台修改。
 
 **提取策略**：
@@ -468,6 +495,7 @@ resp.cost.total_cost_usd
 | `src/llm/client.py` | LiteLLM 封装、调用入口、重试策略、`quick_chat` |
 | `src/llm/response.py` | `LLMResponse` dataclass + `from_litellm_response()` 工厂 |
 | `src/llm/response_extractor.py` | 响应内容提取器（策略模式：Standard / Reasoning / ThinkingBlock） |
+| `src/llm/metadata_extractor.py` | 模型元数据提取器（策略模式：Ark / Ollama / LlamaCpp / OpenAICompat）+ `merge_metadata` |
 | `src/llm/cost.py` | `TokenUsage` / `CostEstimate` dataclass + `extract_usage` / `estimate_cost` |
 | `src/llm/router.py` | 供应商路由（按优先级 + 健康状态选择可用供应商-模型对） |
 
@@ -478,4 +506,6 @@ resp.cost.total_cost_usd
 - 调用入口：`chat_completion`、`chat_completion_with_retry`、`quick_chat`
 - 返回体：`LLMResponse`、`TokenUsage`、`CostEstimate`
 - 独立函数：`extract_content`、`estimate_cost`、`extract_usage`
+- 元数据提取：`ModelMetadata`、`get_metadata_extractor`、`merge_metadata`、各提取器类
+- CRUD：`batch_delete_models`
 - 路由：`select_first_available`

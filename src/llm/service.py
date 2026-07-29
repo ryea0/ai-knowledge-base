@@ -29,6 +29,7 @@ from src.llm.auth_adapter import build_auth_context, build_httpx_headers
 from src.llm.connectivity import build_openai_models_url
 from src.llm.connectivity_service import get_connectivity_map
 from src.llm.crypto import encrypt
+from src.llm.metadata_extractor import get_metadata_extractor, merge_metadata
 from src.llm.orm import LlmHealth, LlmModel, LlmProvider, LlmProviderConnectivity
 from src.llm.schemas import (
     DiscoveredModel,
@@ -386,6 +387,7 @@ def create_model(
         supports_function_calling=data.supports_function_calling,
         supports_vision=data.supports_vision,
         supports_reasoning=data.supports_reasoning,
+        task_type=data.task_type,
         input_price_per_1m=data.input_price_per_1m,
         output_price_per_1m=data.output_price_per_1m,
         is_enabled=data.is_enabled,
@@ -510,6 +512,52 @@ def delete_model(session: Session, model_id: int) -> None:
     logger.info("软删除模型: id=%d", model_id)
 
 
+def batch_delete_models(session: Session, model_ids: list[int]) -> int:
+    """批量软删除模型。
+
+    逐个软删除（设 is_deleted=1 + deleted_at），同步软删除对应的健康状态行。
+    不存在的模型 ID 静默跳过。
+
+    Args:
+        session: SQLAlchemy Session。
+        model_ids: 模型 ID 列表。
+
+    Returns:
+        实际删除的模型数量。
+    """
+    deleted_count = 0
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    models = session.execute(
+        select(LlmModel).where(
+            LlmModel.id.in_(model_ids),
+            LlmModel.is_deleted == False,  # noqa: E712
+        )
+    ).scalars().all()
+
+    model_id_set = {m.id for m in models}
+
+    for model in models:
+        model.is_deleted = True
+        model.deleted_at = now
+        model.is_enabled = False
+
+    if model_id_set:
+        session.execute(
+            update(LlmHealth)
+            .where(
+                LlmHealth.model_id.in_(model_id_set),
+                LlmHealth.is_deleted == False,  # noqa: E712
+            )
+            .values(is_deleted=True, deleted_at=now)
+        )
+
+    session.flush()
+    deleted_count = len(models)
+    logger.info("批量软删除模型: %d/%d", deleted_count, len(model_ids))
+    return deleted_count
+
+
 # ---------------------------------------------------------------------------
 # Model Discovery
 # ---------------------------------------------------------------------------
@@ -521,10 +569,13 @@ def discover_models(
     """通过 ``GET {base_url}/models`` 自动发现可用模型。
 
     流程：
-        1. 调用供应商的 ``/models`` 端点获取模型 ID 列表。
-        2. 交叉 LiteLLM 注册表补全 context_window / pricing / capabilities。
-        3. 与 DB 已有模型比对，标记 ``already_exists``。
-        4. 返回候选列表（不直接写 DB，由前端用户勾选后调用 :func:`create_model`）。
+        1. 调用供应商的 ``/models`` 端点获取模型列表。
+        2. 从 API 响应中提取元数据（按供应商协议族分派策略）。
+        3. 交叉 LiteLLM 注册表补全 API 未提供的字段（优先级：
+           API 响应 > LiteLLM 注册表 > 默认值）。
+        4. 与 DB 已有模型比对，标记 ``already_exists``。
+        5. 返回候选列表（不直接写 DB，由前端用户勾选后调用
+           :func:`create_model`）。
 
     Args:
         session: SQLAlchemy Session。
@@ -566,10 +617,7 @@ def discover_models(
 
     body = resp.json()
     if provider.litellm_provider == "ollama":
-        raw_models = [
-            {"id": m.get("model", m.get("name", ""))}
-            for m in body.get("models", [])
-        ]
+        raw_models = body.get("models", [])
     else:
         raw_models = body.get("data", [])
 
@@ -593,36 +641,42 @@ def discover_models(
     except Exception:
         litellm_registry = {}
 
+    # Step 4: 按供应商协议族选择元数据提取器
+    extractor = get_metadata_extractor(provider)
+
     results: list[DiscoveredModel] = []
 
     for raw in raw_models:
-        model_id_str = raw.get("id", "")
+        model_id_str = raw.get("id", "") or raw.get("model", "") or raw.get("name", "")
         if not model_id_str:
             continue
 
         litellm_model_str = f"{provider.litellm_provider}/{model_id_str}"
         already_exists = model_id_str in existing_codes
 
-        # 尝试从 LiteLLM 注册表补全元数据
-        info = litellm_registry.get(litellm_model_str, {})
+        # 从 API 响应提取元数据
+        api_meta = extractor.extract(raw, provider, headers)
 
-        # 也尝试不带 provider 前缀的查找
+        # 从 LiteLLM 注册表补全
+        info = litellm_registry.get(litellm_model_str, {})
         if not info:
             info = litellm_registry.get(model_id_str, {})
+
+        # 按优先级合并：API > LiteLLM > 默认值
+        merged = merge_metadata(api_meta, info)
 
         results.append(
             DiscoveredModel(
                 model_code=model_id_str,
                 litellm_model=litellm_model_str,
                 display_name=model_id_str,
-                context_window=info.get("max_input_tokens", 4096),
-                max_output_tokens=info.get("max_output_tokens", 4096),
-                supports_streaming=info.get("supports_streaming", True),
-                supports_function_calling=info.get(
-                    "supports_function_calling", False
-                ),
-                supports_vision=info.get("supports_vision", False),
-                supports_reasoning=info.get("supports_reasoning", False),
+                context_window=merged["context_window"],
+                max_output_tokens=merged["max_output_tokens"],
+                supports_streaming=merged["supports_streaming"],
+                supports_function_calling=merged["supports_function_calling"],
+                supports_vision=merged["supports_vision"],
+                supports_reasoning=merged["supports_reasoning"],
+                task_type=merged["task_type"],
                 input_price_per_1m=info.get("input_cost_per_token", 0.0)
                 * 1_000_000,
                 output_price_per_1m=info.get("output_cost_per_token", 0.0)

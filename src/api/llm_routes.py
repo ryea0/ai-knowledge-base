@@ -15,6 +15,7 @@
     - ``POST   /llm/providers/{id}/models``       -- 创建模型
     - ``PATCH  /llm/models/{id}``                 -- 更新模型
     - ``DELETE /llm/models/{id}``                 -- 软删除模型
+    - ``POST   /llm/models/batch-delete``           -- 批量软删除模型
     - ``POST   /llm/providers/{id}/discover``     -- 模型发现
     - ``POST   /llm/health/{model_id}/reset``     -- 重置模型健康状态
 """
@@ -47,6 +48,7 @@ from src.llm.schemas import (
     ProviderUpdate,
 )
 from src.llm.service import (
+    batch_delete_models,
     create_model,
     create_provider,
     delete_model,
@@ -252,6 +254,16 @@ def delete_model_api(
     except ValueError as exc:
         raise BizException(ErrorCode.NOT_FOUND, str(exc)) from exc
     return Result.ok(data=None, message="删除成功")
+
+
+@router.post("/models/batch-delete", summary="批量删除模型")
+def batch_delete_models_api(
+    db: Annotated[Session, Depends(get_db)],
+    model_ids: list[int],
+) -> Result[int]:
+    """批量软删除模型，返回实际删除数量。"""
+    count = batch_delete_models(db, model_ids)
+    return Result.ok(data=count, message=f"已删除 {count} 个模型")
 
 
 # ---------------------------------------------------------------------------

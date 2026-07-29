@@ -34,6 +34,7 @@
 - **类型注解**：所有函数签名必须包含参数与返回值类型注解，配合 `mypy` 静态检查。
 - **依赖管理**：使用 `uv` 管理依赖，锁定文件为 `uv.lock`；禁止手动编辑 `uv.lock`。依赖声明统一写入 `pyproject.toml` 的 `[project.dependencies]` 段。
 - **测试**：新功能须附带 `pytest` 测试用例，覆盖率不低于 80%。
+- **Spec 同步**：涉及 DDL 变更、新增公开 API/模块、改变既有行为时，Agent 须在交付前主动列出需要更新的 `docs/specs/` 条目，经用户确认后同步更新，保持 spec 与代码一致。
 - **交付前检查**：每次提交前须依次运行以下命令，全部通过方可交付：
   ```bash
   uv run ruff check src/ tests/

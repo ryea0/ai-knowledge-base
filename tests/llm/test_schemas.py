@@ -158,6 +158,25 @@ class TestModelCreate:
                 extra="bad",  # type: ignore[call-arg]
             )
 
+    def test_task_type_default_none(self) -> None:
+        """task_type 默认 None。"""
+        m = ModelCreate(
+            model_code="test",
+            litellm_model="openai/test",
+            display_name="Test",
+        )
+        assert m.task_type is None
+
+    def test_task_type_with_values(self) -> None:
+        """task_type 可设置数组。"""
+        m = ModelCreate(
+            model_code="test",
+            litellm_model="openai/test",
+            display_name="Test",
+            task_type=["TextGeneration", "VisualQuestionAnswering"],
+        )
+        assert m.task_type == ["TextGeneration", "VisualQuestionAnswering"]
+
 
 class TestModelUpdate:
     """ModelUpdate 测试。"""
@@ -181,6 +200,17 @@ class TestDiscoveredModel:
         )
         assert m.already_exists is False
         assert m.context_window == 4096
+        assert m.task_type is None
+
+    def test_with_task_type(self) -> None:
+        """带 task_type。"""
+        m = DiscoveredModel(
+            model_code="gpt-4o",
+            litellm_model="openai/gpt-4o",
+            display_name="GPT-4o",
+            task_type=["TextGeneration"],
+        )
+        assert m.task_type == ["TextGeneration"]
 
 
 class TestHealthResponse:
