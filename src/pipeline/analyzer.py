@@ -45,7 +45,7 @@ _JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 class LLMAnalyzer:
     """基于 LLM 的内容分析器。
 
-    使用 :func:`quick_chat` 调用 LLM，自动路由到可用供应商。
+    使用 :func:`chat_for_analysis` 调用 LLM，自动路由到可用供应商。
     LLM 不可用时降级为规则分析。
 
     Attributes:
