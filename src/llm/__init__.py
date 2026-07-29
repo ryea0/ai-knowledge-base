@@ -37,6 +37,7 @@ from src.llm.metadata_extractor import (
 )
 from src.llm.orm import LlmCallLog, LlmHealth, LlmModel, LlmProvider
 from src.llm.response_extractor import extract_content
+from src.llm.retry_decorator import NonRetryableLlmError, with_retry
 from src.llm.router import select_first_available
 from src.llm.schemas import (
     DiscoveredModel,
@@ -85,6 +86,7 @@ __all__ = [
     "ModelCreate",
     "ModelResponse",
     "ModelUpdate",
+    "NonRetryableLlmError",
     "OpenAICompatModelMetadataExtractor",
     "OllamaModelMetadataExtractor",
     "ProviderCreate",
@@ -115,5 +117,6 @@ __all__ = [
     "test_connectivity",
     "update_model",
     "update_provider",
+    "with_retry",
     "write_call_log",
 ]

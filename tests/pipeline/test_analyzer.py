@@ -270,3 +270,117 @@ class TestLLMAnalyzerAnalyze:
         result = analyzer.analyze(item)
 
         assert result["category"] == "tool"
+
+
+class TestGetRetryParams:
+    """_get_retry_params 时间窗口策略测试。"""
+
+    def test_daytime_returns_max_attempts_3(self) -> None:
+        """白天 14:00 返回 max_attempts=3。"""
+        import datetime
+
+        from src.pipeline.analyzer import _get_retry_params
+
+        params = _get_retry_params(
+            now=datetime.datetime(2026, 7, 30, 14, 0, 0)
+        )
+        assert params["max_attempts"] == 3
+        assert params["base_delay"] == 1.0
+        assert params["backoff_factor"] == 2.0
+
+    def test_nighttime_returns_max_attempts_1(self) -> None:
+        """夜间 23:00 返回 max_attempts=1。"""
+        import datetime
+
+        from src.pipeline.analyzer import _get_retry_params
+
+        params = _get_retry_params(
+            now=datetime.datetime(2026, 7, 30, 23, 0, 0)
+        )
+        assert params["max_attempts"] == 1
+
+    def test_boundary_08_returns_3(self) -> None:
+        """08:00 边界返回 max_attempts=3。"""
+        import datetime
+
+        from src.pipeline.analyzer import _get_retry_params
+
+        params = _get_retry_params(
+            now=datetime.datetime(2026, 7, 30, 8, 0, 0)
+        )
+        assert params["max_attempts"] == 3
+
+    def test_boundary_22_returns_1(self) -> None:
+        """22:00 边界返回 max_attempts=1。"""
+        import datetime
+
+        from src.pipeline.analyzer import _get_retry_params
+
+        params = _get_retry_params(
+            now=datetime.datetime(2026, 7, 30, 22, 0, 0)
+        )
+        assert params["max_attempts"] == 1
+
+
+class TestAnalyzeFallbackExtended:
+    """analyze() 降级测试 -- BudgetExceededError / NonRetryableLlmError / LlmCallError。"""
+
+    @patch.object(LLMAnalyzer, "_analyze_with_llm")
+    def test_analyze_falls_back_on_budget_exceeded(self, mock_llm: patch) -> None:
+        """BudgetExceededError 降级为规则分析。"""
+        from src.llm.budget import BudgetExceededError
+
+        mock_llm.side_effect = BudgetExceededError(
+            "budget exceeded",
+            daily_limit=100.0,
+            daily_spent=90.0,
+            estimated_cost=20.0,
+            currency="CNY",
+        )
+        analyzer = LLMAnalyzer()
+        item = {"title": "GPT-5 Released", "summary": "New model", "source": "github"}
+
+        result = analyzer.analyze(item)
+
+        assert result["category"] == "model_release"
+        assert result["score"] == 5
+
+    @patch.object(LLMAnalyzer, "_analyze_with_llm")
+    def test_analyze_falls_back_on_non_retryable_llm_error(
+        self, mock_llm: patch
+    ) -> None:
+        """NonRetryableLlmError 降级为规则分析。"""
+        from src.llm.client import LlmCallError, LlmErrorType
+        from src.llm.retry_decorator import NonRetryableLlmError
+
+        original = LlmCallError(
+            "auth failed",
+            error_type=LlmErrorType.AUTH_FAILED,
+        )
+        mock_llm.side_effect = NonRetryableLlmError(original)
+        analyzer = LLMAnalyzer()
+        item = {"title": "LLM tool", "summary": "A tool", "source": "github"}
+
+        result = analyzer.analyze(item)
+
+        assert result["category"] == "tool"
+        assert result["score"] == 5
+
+    @patch.object(LLMAnalyzer, "_analyze_with_llm")
+    def test_analyze_falls_back_on_llm_call_error_retry_exhausted(
+        self, mock_llm: patch
+    ) -> None:
+        """LlmCallError（重试耗尽后）降级为规则分析。"""
+        from src.llm.client import LlmCallError, LlmErrorType
+
+        mock_llm.side_effect = LlmCallError(
+            "timeout after retries",
+            error_type=LlmErrorType.TIMEOUT,
+        )
+        analyzer = LLMAnalyzer()
+        item = {"title": "Something new", "summary": "desc", "source": "rss"}
+
+        result = analyzer.analyze(item)
+
+        assert result["category"] == "news"
+        assert result["score"] == 5

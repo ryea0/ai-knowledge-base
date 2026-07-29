@@ -1,6 +1,6 @@
 """LLM 内容分析器。
 
-调用 :func:`src.llm.client.quick_chat` 对每条采集内容进行分析，
+调用 :func:`src.pipeline.llm_call_adapter.chat_for_analysis` 对每条采集内容进行分析，
 生成中文摘要、亮点、1-10 评分、标签和分类。
 
 分析结果为 JSON 字符串，本模块负责解析为 dict。
@@ -10,12 +10,21 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 import logging
 import re
 from typing import Any
 
-from src.llm.client import LlmCallError, quick_chat
+from src.llm.budget import BudgetExceededError
+from src.llm.client import LlmCallError
+from src.llm.retry_decorator import (
+    NON_RETRYABLE_CONTENT_EXCEPTIONS,
+    RETRYABLE_HTTP_EXCEPTIONS,
+    NonRetryableLlmError,
+    with_retry,
+)
+from src.pipeline.llm_call_adapter import chat_for_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +97,20 @@ class LLMAnalyzer:
         """
         try:
             return self._analyze_with_llm(item)
-        except (LlmCallError, RuntimeError) as exc:
+        except (
+            LlmCallError,
+            RuntimeError,
+            BudgetExceededError,
+            NonRetryableLlmError,
+        ) as exc:
             logger.warning("LLM 分析失败，降级为规则分析: %s", exc)
             return self._fallback_analyze(item)
 
     def _analyze_with_llm(self, item: dict[str, Any]) -> dict[str, Any]:
         """调用 LLM 进行分析。
+
+        使用 ``@with_retry`` 装饰的 ``chat_for_analysis`` 调用 LLM，
+        重试参数按时间窗口策略表动态传入。
 
         Args:
             item: 采集条目。
@@ -102,8 +119,10 @@ class LLMAnalyzer:
             分析结果 dict。
 
         Raises:
-            LlmCallError: LLM 调用失败。
+            LlmCallError: LLM 调用失败（重试耗尽后）。
             RuntimeError: 无可用供应商或 JSON 解析失败。
+            BudgetExceededError: 预算超限。
+            NonRetryableLlmError: 不可重试的 LLM 错误。
         """
         from src.config.database import session_scope
 
@@ -113,8 +132,20 @@ class LLMAnalyzer:
             summary=item.get("summary", ""),
         )
 
+        retry_params = _get_retry_params()
+
+        decorated_chat = with_retry(
+            retry_on=(LlmCallError, *RETRYABLE_HTTP_EXCEPTIONS),
+            no_retry_on=(
+                BudgetExceededError,
+                NonRetryableLlmError,
+                *NON_RETRYABLE_CONTENT_EXCEPTIONS,
+            ),
+            **retry_params,
+        )(chat_for_analysis)
+
         with session_scope() as session:
-            raw_response = quick_chat(
+            raw_response = decorated_chat(
                 prompt=user_prompt,
                 session=session,
                 system_prompt=_SYSTEM_PROMPT,
@@ -279,3 +310,24 @@ class LLMAnalyzer:
             "category": category,
             "language": "en",
         }
+
+
+def _get_retry_params(
+    now: datetime.datetime | None = None,
+) -> dict[str, Any]:
+    """按时间窗口获取重试参数。
+
+    白天 (08:00-22:00): 容忍多次重试。
+    夜间 (22:00-08:00): 失败不重试，避免长时间阻塞。
+
+    Args:
+        now: 可注入的当前时间，用于测试。默认 ``datetime.datetime.now()``。
+
+    Returns:
+        重试参数字典，可直接解包传入 ``with_retry``。
+    """
+    current = now or datetime.datetime.now()
+    hour = current.hour
+    if 8 <= hour < 22:
+        return {"max_attempts": 3, "base_delay": 1.0, "backoff_factor": 2.0}
+    return {"max_attempts": 1}
