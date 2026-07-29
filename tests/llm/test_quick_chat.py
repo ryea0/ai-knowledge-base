@@ -284,9 +284,10 @@ class TestQuickChat:
             usage=TokenUsage(5, 3, 8),
             cost=CostEstimate(
                 usage=TokenUsage(5, 3, 8),
-                input_cost_usd=0.0,
-                output_cost_usd=0.0,
-                total_cost_usd=0.0,
+                input_cost=0.0,
+                output_cost=0.0,
+                total_cost=0.0,
+                currency="CNY",
             ),
             model_code="doubao-pro",
             provider_code="ark",

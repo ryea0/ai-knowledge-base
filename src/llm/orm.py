@@ -118,8 +118,9 @@ class LlmModel(BaseEntity):
             或 thinking_blocks 而非 content）。
         task_type: 任务类型数组，如 ``["TextGeneration"]``、
             ``["VisualQuestionAnswering"]``，由模型发现时从 API 提取。
-        input_price_per_1m: 输入每百万 token 价格 USD。
-        output_price_per_1m: 输出每百万 token 价格 USD。
+        input_price_per_1m: 输入每百万 token 价格，币种见 ``currency`` 字段。
+        output_price_per_1m: 输出每百万 token 价格，币种见 ``currency`` 字段。
+        currency: 计费币种（CNY / USD），默认 CNY。
         is_enabled: 是否启用。
         is_default: 是否为该供应商默认模型。
         source: 模型记录来源（preset / discovered / manual）。
@@ -158,6 +159,9 @@ class LlmModel(BaseEntity):
     )
     output_price_per_1m: Mapped[float] = mapped_column(
         Numeric(10, 4), nullable=False, default=0.0
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="CNY"
     )
     is_enabled: Mapped[bool] = mapped_column(
         Integer, nullable=False, default=True
@@ -281,7 +285,8 @@ class LlmCallLog(Base):
         input_tokens: 输入 token 数，失败时为 None。
         output_tokens: 输出 token 数，失败时为 None。
         total_tokens: 总 token 数，失败时为 None。
-        cost_usd: 预估成本 USD，失败时为 None。
+        cost_amount: 预估成本金额，失败时为 None。
+        cost_currency: 成本币种（CNY / USD），失败时为 None。
         latency_ms: 响应延迟毫秒，失败时为 None。
         error_msg: 失败原因（脱敏后），成功时为 None。
         called_at: 调用时间。
@@ -305,7 +310,8 @@ class LlmCallLog(Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    cost_amount: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    cost_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_msg: Mapped[str | None] = mapped_column(String(500), nullable=True)
     called_at: Mapped[datetime] = mapped_column(

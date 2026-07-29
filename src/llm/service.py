@@ -390,6 +390,7 @@ def create_model(
         task_type=data.task_type,
         input_price_per_1m=data.input_price_per_1m,
         output_price_per_1m=data.output_price_per_1m,
+        currency=data.currency,
         is_enabled=data.is_enabled,
         is_default=data.is_default,
         source=LlmModelSource.MANUAL,
@@ -665,6 +666,13 @@ def discover_models(
         # 按优先级合并：API > LiteLLM > 默认值
         merged = merge_metadata(api_meta, info)
 
+        # LiteLLM 注册表价格为 USD，国产供应商实际计费为 CNY
+        is_openai_official = (
+            provider.litellm_provider == "openai"
+            and "api.openai.com" in provider.base_url
+        )
+        discovered_currency = "USD" if is_openai_official else "CNY"
+
         results.append(
             DiscoveredModel(
                 model_code=model_id_str,
@@ -681,6 +689,7 @@ def discover_models(
                 * 1_000_000,
                 output_price_per_1m=info.get("output_cost_per_token", 0.0)
                 * 1_000_000,
+                currency=discovered_currency,
                 already_exists=already_exists,
             )
         )

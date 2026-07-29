@@ -436,6 +436,7 @@ def _make_model_mock() -> MagicMock:
     model.supports_reasoning = False
     model.input_price_per_1m = 0.0
     model.output_price_per_1m = 0.0
+    model.currency = "CNY"
     model.id = 1
     return model
 
@@ -815,7 +816,7 @@ class TestChatCompletionCallLog:
         assert log.input_tokens is None
         assert log.output_tokens is None
         assert log.total_tokens is None
-        assert log.cost_usd is None
+        assert log.cost_amount is None
         assert "connection failed" in (log.error_msg or "")
         session.close()
 

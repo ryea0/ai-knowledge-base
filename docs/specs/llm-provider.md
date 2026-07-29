@@ -119,8 +119,9 @@ CREATE TABLE kb_llm_provider (
 | `supports_vision` | TINYINT(1) | 0 | 是否支持视觉/多模态 |
 | `supports_reasoning` | TINYINT(1) | 0 | 是否为推理模型（详见 §9.7） |
 | `task_type` | JSON | NULL | 任务类型数组，如 `["TextGeneration"]`、`["VisualQuestionAnswering"]`，由模型发现时从供应商 API 提取（详见 §9.4） |
-| `input_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输入每百万 token 价格 USD，local=0 |
-| `output_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输出每百万 token 价格 USD，local=0 |
+| `input_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输入每百万 token 价格，币种见 `currency` 列，local=0 |
+| `output_price_per_1m` | DECIMAL(10,4) | 0.0000 | 输出每百万 token 价格，币种见 `currency` 列，local=0 |
+| `currency` | CHAR(3) | `CNY` | 计费币种：CNY=人民币, USD=美元 |
 | `source` | TINYINT | 0 | 来源 0=preset 1=discovered 2=manual |
 
 ### `kb_llm_health` 表结构
@@ -392,7 +393,7 @@ discover_models(provider_id):
 class LLMResponse:
     content: str                              # 已提取的回复文本
     usage: TokenUsage                         # Token 用量统计
-    cost: CostEstimate                        # 成本估算（USD）
+    cost: CostEstimate                        # 成本估算（含币种）
     model_code: str                           # 模型代码
     provider_code: str                        # 供应商代码
     latency_ms: int                           # 调用耗时（毫秒）
@@ -412,7 +413,8 @@ class LLMResponse:
 resp = chat_completion_with_retry(provider, model, messages, session=session)
 print(resp.content)                  # "你好！"
 print(resp.usage.total_tokens)       # 128
-print(resp.cost.total_cost_usd)      # 0.000123
+print(resp.cost.total_cost)          # 0.000123
+print(resp.cost.currency)            # "CNY"
 ```
 
 ### 推理模型响应提取（策略模式）
@@ -460,12 +462,13 @@ class TokenUsage:
 @dataclass(frozen=True)
 class CostEstimate:
     usage: TokenUsage
-    input_cost_usd: float
-    output_cost_usd: float
-    total_cost_usd: float
+    input_cost: float
+    output_cost: float
+    total_cost: float
+    currency: str = "CNY"
 ```
 
-**定价来源**：`kb_llm_model.input_price_per_1m` / `output_price_per_1m`（每百万 token 的 USD 价格），由模型发现时从 LiteLLM 注册表自动填充，或手动配置。local 类型模型（Ollama / llama.cpp）定价为 0。
+**定价来源**：`kb_llm_model.input_price_per_1m` / `output_price_per_1m`（每百万 token 的价格），币种由 `kb_llm_model.currency` 字段决定（CNY / USD），由模型发现时从 LiteLLM 注册表自动填充，或手动配置。local 类型模型（Ollama / llama.cpp）定价为 0。
 
 **计算公式**：
 
@@ -485,7 +488,7 @@ from src.llm.cost import estimate_cost
 cost = estimate_cost(response, model)
 # 或通过 LLMResponse 直接访问
 resp = chat_completion_with_retry(provider, model, messages)
-resp.cost.total_cost_usd
+resp.cost.total_cost
 ```
 
 ### 模块文件索引
@@ -497,6 +500,7 @@ resp.cost.total_cost_usd
 | `src/llm/response_extractor.py` | 响应内容提取器（策略模式：Standard / Reasoning / ThinkingBlock） |
 | `src/llm/metadata_extractor.py` | 模型元数据提取器（策略模式：Ark / Ollama / LlamaCpp / OpenAICompat）+ `merge_metadata` |
 | `src/llm/cost.py` | `TokenUsage` / `CostEstimate` dataclass + `extract_usage` / `estimate_cost` |
+| `src/llm/budget.py` | 预算控制 Hook（`BudgetConfig` / `BudgetGuard` / `BudgetExceededError`） |
 | `src/llm/router.py` | 供应商路由（按优先级 + 健康状态选择可用供应商-模型对） |
 
 ### 公开导出
@@ -507,5 +511,58 @@ resp.cost.total_cost_usd
 - 返回体：`LLMResponse`、`TokenUsage`、`CostEstimate`
 - 独立函数：`extract_content`、`estimate_cost`、`extract_usage`
 - 元数据提取：`ModelMetadata`、`get_metadata_extractor`、`merge_metadata`、各提取器类
+- 预算控制：`BudgetConfig`、`BudgetGuard`、`BudgetExceededError`
 - CRUD：`batch_delete_models`
 - 路由：`select_first_available`
+
+## §9.8 预算控制 Hook
+
+### 设计目标
+
+在 LLM 调用前后自动执行成本检查，防止单日/单次调用成本失控。
+
+- **调用前（pre-call）**：查询当日已消耗成本，若加上预估成本超过每日上限，阻止调用（抛 `BudgetExceededError`）。
+- **调用后（post-call）**：检查单次成本是否超过单次上限、当日累计是否超过每日上限，超过则发出 `WARNING` 日志告警（不阻止调用）。
+
+### 配置
+
+通过环境变量配置，0 表示不限：
+
+| 环境变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `LLM_BUDGET_DAILY_CNY` | 每日成本上限（人民币） | `0` |
+| `LLM_BUDGET_DAILY_USD` | 每日成本上限（美元） | `0` |
+| `LLM_BUDGET_PER_CALL_CNY` | 单次调用成本上限（人民币） | `0` |
+| `LLM_BUDGET_PER_CALL_USD` | 单次调用成本上限（美元） | `0` |
+
+### 多币种处理
+
+预算按币种独立计算：CNY 消耗只计 CNY 上限，USD 消耗只计 USD 上限。模型币种由 `kb_llm_model.currency` 字段决定。
+
+### 每日消耗查询
+
+从 `kb_llm_call_log` 表汇总当日（UTC 日期）所有成功调用的 `cost_amount`，按 `cost_currency` 分组。不区分供应商/模型。
+
+### 预估成本
+
+调用前预估使用模型定价的「最大输入 + 最大输出」：
+
+```
+estimated = (context_window / 1M) * input_price_per_1m
+          + (max_output_tokens / 1M) * output_price_per_1m
+```
+
+这是保守预估（假设满载上下文），实际成本通常远低于此值。
+
+### 集成点
+
+预算检查在 `chat_completion()` 内部自动执行（需传入 `session` 参数）：
+
+1. **pre-call**：在 `litellm.completion()` 调用前执行 `BudgetGuard.check_pre_call(model)`，超限抛 `BudgetExceededError`。
+2. **post-call**：在 `write_call_log()` 之后执行 `BudgetGuard.check_post_call(cost)`，超限仅告警。
+
+`quick_chat()` 内部调用 `chat_completion_with_retry()` -> `chat_completion()`，因此也自动受预算控制。
+
+### 汇率
+
+当需要跨币种换算时（如 USD 成本计入 CNY 上限），使用 `BudgetConfig.fx_rates` 中的汇率。默认 `USD_TO_CNY=7.2`，仅供参考。当前设计按币种独立计算，不跨币种汇总。

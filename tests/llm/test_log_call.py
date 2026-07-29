@@ -41,9 +41,10 @@ class TestWriteCallLogSuccess:
         )
         cost = CostEstimate(
             usage=usage,
-            input_cost_usd=0.001,
-            output_cost_usd=0.002,
-            total_cost_usd=0.003,
+            input_cost=0.001,
+            output_cost=0.002,
+            total_cost=0.003,
+            currency="CNY",
         )
 
         write_call_log(
@@ -65,7 +66,8 @@ class TestWriteCallLogSuccess:
         assert log.input_tokens == 100
         assert log.output_tokens == 50
         assert log.total_tokens == 150
-        assert float(log.cost_usd) == pytest.approx(0.003)
+        assert float(log.cost_amount) == pytest.approx(0.003)
+        assert log.cost_currency == "CNY"
         assert log.latency_ms == 1234
         assert log.error_msg is None
 
@@ -86,7 +88,8 @@ class TestWriteCallLogSuccess:
         assert log.input_tokens is None
         assert log.output_tokens is None
         assert log.total_tokens is None
-        assert log.cost_usd is None
+        assert log.cost_amount is None
+        assert log.cost_currency is None
         assert log.latency_ms == 500
 
     def test_writes_without_latency(self, session: Session) -> None:
@@ -125,7 +128,8 @@ class TestWriteCallLogFailure:
         assert log.input_tokens is None
         assert log.output_tokens is None
         assert log.total_tokens is None
-        assert log.cost_usd is None
+        assert log.cost_amount is None
+        assert log.cost_currency is None
         assert log.latency_ms == 300
 
     def test_writes_without_error_msg(self, session: Session) -> None:

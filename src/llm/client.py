@@ -36,6 +36,8 @@ from src.llm.utils import sanitize_secrets
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from src.llm.budget import BudgetConfig
+
 logger = logging.getLogger(__name__)
 
 # 关闭 LiteLLM 自身的日志输出，避免污染标准输出
@@ -255,7 +257,7 @@ def chat_completion(
         **kwargs: 透传给 LiteLLM ``completion()`` 的额外参数。
 
     Returns:
-        非流式调用返回 :class:`LLMResponse`（含 content / usage / cost）；
+        非流式调用返回 :class:`LLMResponse`（含 content / usage / cost，cost 含币种信息）；
         流式调用返回 LiteLLM 原始响应对象。
 
     Raises:
@@ -291,6 +293,19 @@ def chat_completion(
         model.model_code,
         len(messages),
     )
+
+    # 预算控制：调用前检查每日上限
+    if session is not None:
+        from src.config.settings import get_settings
+        from src.llm.budget import BudgetGuard
+
+        settings = get_settings()
+        if any([
+            settings.budget.daily_limit_cny,
+            settings.budget.daily_limit_usd,
+        ]):
+            guard = BudgetGuard(session, _budget_config_from_settings(settings))
+            guard.check_pre_call(model)
 
     start = time.monotonic()
     try:
@@ -387,6 +402,21 @@ def chat_completion(
             latency_ms=latency_ms,
         )
 
+        # 预算控制：调用后检查单次上限 + 每日累计
+        from src.config.settings import get_settings
+
+        settings = get_settings()
+        if any([
+            settings.budget.daily_limit_cny,
+            settings.budget.daily_limit_usd,
+            settings.budget.per_call_limit_cny,
+            settings.budget.per_call_limit_usd,
+        ]):
+            from src.llm.budget import BudgetGuard
+
+            guard = BudgetGuard(session, _budget_config_from_settings(settings))
+            guard.check_post_call(llm_response.cost)
+
     return llm_response
 
 
@@ -471,6 +501,25 @@ def chat_completion_with_retry(
                 backoff,
             )
             time.sleep(backoff)
+
+
+def _budget_config_from_settings(settings: Any) -> BudgetConfig:
+    """从 :class:`Settings` 构造 :class:`BudgetConfig`。
+
+    Args:
+        settings: 全局配置 :class:`Settings` 实例。
+
+    Returns:
+        :class:`BudgetConfig` 实例。
+    """
+    from src.llm.budget import BudgetConfig
+
+    return BudgetConfig(
+        daily_limit_cny=settings.budget.daily_limit_cny,
+        daily_limit_usd=settings.budget.daily_limit_usd,
+        per_call_limit_cny=settings.budget.per_call_limit_cny,
+        per_call_limit_usd=settings.budget.per_call_limit_usd,
+    )
 
 
 def _classify_exception(exc: Exception) -> LlmErrorType:

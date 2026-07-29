@@ -68,7 +68,11 @@ def test_chat_completion_with_cost() -> None:
 
         print(f"供应商: {provider.provider_code}")
         print(f"模型: {model.model_code} (litellm: {model.litellm_model})")
-        print(f"定价: input=${model.input_price_per_1m}/1M  output=${model.output_price_per_1m}/1M")
+        print(
+            f"定价: input={model.input_price_per_1m}/1M"
+            f"  output={model.output_price_per_1m}/1M"
+            f"  currency={model.currency}"
+        )
 
         try:
             response = chat_completion_with_retry(
@@ -89,10 +93,10 @@ def test_chat_completion_with_cost() -> None:
             print(f"  prompt_tokens:     {response.usage.prompt_tokens}")
             print(f"  completion_tokens: {response.usage.completion_tokens}")
             print(f"  total_tokens:      {response.usage.total_tokens}")
-            print("成本估算 (USD):")
-            print(f"  input_cost:  ${response.cost.input_cost_usd:.6f}")
-            print(f"  output_cost: ${response.cost.output_cost_usd:.6f}")
-            print(f"  total_cost:  ${response.cost.total_cost_usd:.6f}")
+            print(f"成本估算 ({response.cost.currency}):")
+            print(f"  input_cost:  {response.cost.input_cost:.6f}")
+            print(f"  output_cost: {response.cost.output_cost:.6f}")
+            print(f"  total_cost:  {response.cost.total_cost:.6f}")
 
         except Exception as exc:
             print(f"失败: {exc}")
@@ -145,7 +149,11 @@ def test_deepseek() -> None:
 
         print(f"供应商: {provider.provider_code}")
         print(f"模型: {model.model_code} (litellm: {model.litellm_model})")
-        print(f"定价: input=${model.input_price_per_1m}/1M  output=${model.output_price_per_1m}/1M")
+        print(
+            f"定价: input={model.input_price_per_1m}/1M"
+            f"  output={model.output_price_per_1m}/1M"
+            f"  currency={model.currency}"
+        )
 
         try:
             response = chat_completion_with_retry(
@@ -163,7 +171,7 @@ def test_deepseek() -> None:
                 f" completion={response.usage.completion_tokens}"
                 f" total={response.usage.total_tokens}"
             )
-            print(f"成本: ${response.cost.total_cost_usd:.6f}")
+            print(f"成本: {response.cost.total_cost:.6f} {response.cost.currency}")
 
         except Exception as exc:
             print(f"失败: {exc}")

@@ -142,7 +142,7 @@ def _make_settings(
     Returns:
         Settings 实例。
     """
-    from src.config.settings import DistributorConfig, LLMConfig, MySQLConfig
+    from src.config.settings import BudgetConfig, DistributorConfig, LLMConfig, MySQLConfig
 
     return Settings(
         mysql=MySQLConfig(
@@ -162,6 +162,12 @@ def _make_settings(
         distributor=DistributorConfig(
             telegram_bot_token=telegram,
             feishu_webhook_url=feishu,
+        ),
+        budget=BudgetConfig(
+            daily_limit_cny=0.0,
+            daily_limit_usd=0.0,
+            per_call_limit_cny=0.0,
+            per_call_limit_usd=0.0,
         ),
         github_token=None,
     )

@@ -70,6 +70,27 @@ class LLMConfig:
 
 
 @dataclass(frozen=True)
+class BudgetConfig:
+    """LLM 调用预算控制配置。
+
+    通过环境变量 ``LLM_BUDGET_DAILY_CNY`` / ``LLM_BUDGET_DAILY_USD`` /
+    ``LLM_BUDGET_PER_CALL_CNY`` / ``LLM_BUDGET_PER_CALL_USD`` 设置。
+    所有上限默认为 0（不限速）。
+
+    Attributes:
+        daily_limit_cny: 每日成本上限（人民币），0 表示不限。
+        daily_limit_usd: 每日成本上限（美元），0 表示不限。
+        per_call_limit_cny: 单次调用成本上限（人民币），0 表示不限。
+        per_call_limit_usd: 单次调用成本上限（美元），0 表示不限。
+    """
+
+    daily_limit_cny: float
+    daily_limit_usd: float
+    per_call_limit_cny: float
+    per_call_limit_usd: float
+
+
+@dataclass(frozen=True)
 class DistributorConfig:
     """分发渠道配置。
 
@@ -95,12 +116,14 @@ class Settings:
         mysql: MySQL 连接配置。
         llm: LLM 配置。
         distributor: 分发渠道配置。
+        budget: 预算控制配置。
         github_token: GitHub API Token（可选）。
     """
 
     mysql: MySQLConfig
     llm: LLMConfig
     distributor: DistributorConfig
+    budget: BudgetConfig
     github_token: str | None
 
 
@@ -159,12 +182,20 @@ def get_settings() -> Settings:
         feishu_webhook_url=_get_env("FEISHU_WEBHOOK_URL") or None,
     )
 
+    budget = BudgetConfig(
+        daily_limit_cny=float(_get_env("LLM_BUDGET_DAILY_CNY", "0") or "0"),
+        daily_limit_usd=float(_get_env("LLM_BUDGET_DAILY_USD", "0") or "0"),
+        per_call_limit_cny=float(_get_env("LLM_BUDGET_PER_CALL_CNY", "0") or "0"),
+        per_call_limit_usd=float(_get_env("LLM_BUDGET_PER_CALL_USD", "0") or "0"),
+    )
+
     github_token = _get_env("GITHUB_TOKEN") or None
 
     settings = Settings(
         mysql=mysql,
         llm=llm,
         distributor=distributor,
+        budget=budget,
         github_token=github_token,
     )
 

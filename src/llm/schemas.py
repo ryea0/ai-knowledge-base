@@ -164,8 +164,11 @@ class ModelBase(BaseModel):
     task_type: list[str] | None = Field(
         None, description="任务类型数组，如 TextGeneration / VisualQuestionAnswering"
     )
-    input_price_per_1m: float = Field(0.0, ge=0, description="输入每百万 token 价格 USD")
-    output_price_per_1m: float = Field(0.0, ge=0, description="输出每百万 token 价格 USD")
+    input_price_per_1m: float = Field(0.0, ge=0, description="输入每百万 token 价格")
+    output_price_per_1m: float = Field(0.0, ge=0, description="输出每百万 token 价格")
+    currency: str = Field(
+        "CNY", min_length=3, max_length=3, description="计费币种：CNY=人民币, USD=美元"
+    )
     is_enabled: bool = Field(True, description="是否启用")
     is_default: bool = Field(False, description="是否为该供应商默认模型")
 
@@ -191,6 +194,7 @@ class ModelUpdate(BaseModel):
     task_type: list[str] | None = Field(None, description="任务类型数组，None 表示不修改")
     input_price_per_1m: float | None = Field(None, ge=0)
     output_price_per_1m: float | None = Field(None, ge=0)
+    currency: str | None = Field(None, min_length=3, max_length=3)
     is_enabled: bool | None = None
     is_default: bool | None = None
 
@@ -215,6 +219,7 @@ class ModelResponse(BaseModel):
     task_type: list[str] | None
     input_price_per_1m: float
     output_price_per_1m: float
+    currency: str
     is_enabled: bool
     is_default: bool
     source: LlmModelSource
@@ -239,6 +244,7 @@ class DiscoveredModel(BaseModel):
     task_type: list[str] | None = Field(None, description="任务类型数组")
     input_price_per_1m: float = Field(0.0, ge=0, description="输入价格，来自 LiteLLM 注册表")
     output_price_per_1m: float = Field(0.0, ge=0, description="输出价格，来自 LiteLLM 注册表")
+    currency: str = Field("CNY", min_length=3, max_length=3, description="计费币种")
     already_exists: bool = Field(
         False, description="DB 中已存在该 model_code，前端可跳过"
     )

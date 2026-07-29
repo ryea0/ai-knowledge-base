@@ -30,12 +30,14 @@ def _make_model(
     input_price: float = 1.0,
     output_price: float = 2.0,
     model_code: str = "test-model",
+    currency: str = "CNY",
 ) -> MagicMock:
     """构造 model mock，含定价字段。"""
     model = MagicMock()
     model.input_price_per_1m = input_price
     model.output_price_per_1m = output_price
     model.model_code = model_code
+    model.currency = currency
     return model
 
 
@@ -107,21 +109,23 @@ class TestCostEstimate:
         usage = TokenUsage(100, 50, 150)
         cost = CostEstimate(
             usage=usage,
-            input_cost_usd=0.1,
-            output_cost_usd=0.1,
-            total_cost_usd=0.2,
+            input_cost=0.1,
+            output_cost=0.1,
+            total_cost=0.2,
+            currency="CNY",
         )
         assert cost.usage is usage
-        assert cost.input_cost_usd == 0.1
-        assert cost.output_cost_usd == 0.1
-        assert cost.total_cost_usd == 0.2
+        assert cost.input_cost == 0.1
+        assert cost.output_cost == 0.1
+        assert cost.total_cost == 0.2
+        assert cost.currency == "CNY"
 
     def test_frozen(self) -> None:
         """frozen=True，不可变。"""
         usage = TokenUsage(100, 50, 150)
-        cost = CostEstimate(usage, 0.1, 0.1, 0.2)
+        cost = CostEstimate(usage, 0.1, 0.1, 0.2, "CNY")
         with pytest.raises(AttributeError):
-            cost.total_cost_usd = 999  # type: ignore[misc]
+            cost.total_cost = 999  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +192,7 @@ class TestEstimateCost:
     def test_basic_calculation(self) -> None:
         """基础成本计算。
 
-        model 定价: input=$1/1M, output=$2/1M
+        model 定价: input=1/1M, output=2/1M (CNY)
         usage: prompt=100, completion=50
         input_cost = 100/1_000_000 * 1 = 0.0001
         output_cost = 50/1_000_000 * 2 = 0.0001
@@ -202,9 +206,10 @@ class TestEstimateCost:
         assert cost.usage.prompt_tokens == 100
         assert cost.usage.completion_tokens == 50
         assert cost.usage.total_tokens == 150
-        assert cost.input_cost_usd == pytest.approx(0.0001)
-        assert cost.output_cost_usd == pytest.approx(0.0001)
-        assert cost.total_cost_usd == pytest.approx(0.0002)
+        assert cost.input_cost == pytest.approx(0.0001)
+        assert cost.output_cost == pytest.approx(0.0001)
+        assert cost.total_cost == pytest.approx(0.0002)
+        assert cost.currency == "CNY"
 
     def test_zero_price_model(self) -> None:
         """零定价模型成本为零。"""
@@ -213,9 +218,9 @@ class TestEstimateCost:
 
         cost = estimate_cost(resp, model)
 
-        assert cost.input_cost_usd == 0.0
-        assert cost.output_cost_usd == 0.0
-        assert cost.total_cost_usd == 0.0
+        assert cost.input_cost == 0.0
+        assert cost.output_cost == 0.0
+        assert cost.total_cost == 0.0
 
     def test_no_usage_in_response(self) -> None:
         """响应无 usage 字段返回零成本。"""
@@ -227,7 +232,7 @@ class TestEstimateCost:
         assert cost.usage.prompt_tokens == 0
         assert cost.usage.completion_tokens == 0
         assert cost.usage.total_tokens == 0
-        assert cost.total_cost_usd == 0.0
+        assert cost.total_cost == 0.0
 
     def test_object_response(self) -> None:
         """Pydantic 对象形态响应计算正确。"""
@@ -238,9 +243,9 @@ class TestEstimateCost:
 
         assert cost.usage.prompt_tokens == 1000
         assert cost.usage.completion_tokens == 500
-        assert cost.input_cost_usd == pytest.approx(0.003)
-        assert cost.output_cost_usd == pytest.approx(0.003)
-        assert cost.total_cost_usd == pytest.approx(0.006)
+        assert cost.input_cost == pytest.approx(0.003)
+        assert cost.output_cost == pytest.approx(0.003)
+        assert cost.total_cost == pytest.approx(0.006)
 
     def test_large_token_count(self) -> None:
         """大 token 数量计算正确。"""
@@ -249,9 +254,9 @@ class TestEstimateCost:
 
         cost = estimate_cost(resp, model)
 
-        assert cost.input_cost_usd == pytest.approx(0.5)
-        assert cost.output_cost_usd == pytest.approx(0.75)
-        assert cost.total_cost_usd == pytest.approx(1.25)
+        assert cost.input_cost == pytest.approx(0.5)
+        assert cost.output_cost == pytest.approx(0.75)
+        assert cost.total_cost == pytest.approx(1.25)
 
     def test_cost_rounded_to_6_decimals(self) -> None:
         """成本四舍五入至 6 位小数。"""
@@ -260,8 +265,8 @@ class TestEstimateCost:
 
         cost = estimate_cost(resp, model)
 
-        assert cost.input_cost_usd == round(0.001 / 1_000_000, 6)
-        assert cost.output_cost_usd == round(0.001 / 1_000_000, 6)
+        assert cost.input_cost == round(0.001 / 1_000_000, 6)
+        assert cost.output_cost == round(0.001 / 1_000_000, 6)
 
     def test_partial_usage_no_total(self) -> None:
         """usage 缺少 total_tokens 时自动求和后计算。"""
@@ -271,4 +276,35 @@ class TestEstimateCost:
         cost = estimate_cost(resp, model)
 
         assert cost.usage.total_tokens == 150
-        assert cost.total_cost_usd == pytest.approx(0.00015)
+        assert cost.total_cost == pytest.approx(0.00015)
+
+    def test_usd_currency(self) -> None:
+        """USD 币种的模型成本计算。"""
+        model = _make_model(input_price=0.15, output_price=0.6, currency="USD")
+        resp = _make_dict_response(1_000_000, 500_000, 1_500_000)
+
+        cost = estimate_cost(resp, model)
+
+        assert cost.input_cost == pytest.approx(0.15)
+        assert cost.output_cost == pytest.approx(0.3)
+        assert cost.total_cost == pytest.approx(0.45)
+        assert cost.currency == "USD"
+
+    def test_currency_from_model(self) -> None:
+        """币种从 model.currency 读取。"""
+        model = _make_model(currency="USD")
+        resp = _make_dict_response(100, 50, 150)
+
+        cost = estimate_cost(resp, model)
+
+        assert cost.currency == "USD"
+
+    def test_no_usage_carries_currency(self) -> None:
+        """无 usage 时仍携带币种信息。"""
+        model = _make_model(currency="USD")
+        resp: dict[str, object] = {"choices": []}
+
+        cost = estimate_cost(resp, model)
+
+        assert cost.currency == "USD"
+        assert cost.total_cost == 0.0

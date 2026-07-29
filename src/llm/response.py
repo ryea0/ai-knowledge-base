@@ -9,9 +9,10 @@
     from src.llm.client import chat_completion_with_retry
 
     resp = chat_completion_with_retry(provider, model, messages)
-    print(resp.content)         # "你好！"
-    print(resp.usage.total_tokens)  # 128
-    print(resp.cost.total_cost_usd) # 0.000123
+    print(resp.content)           # "你好！"
+    print(resp.usage.total_tokens)    # 128
+    print(resp.cost.total_cost)       # 0.000123
+    print(resp.cost.currency)         # "CNY"
 
 对于流式调用（``stream=True``），返回原始 LiteLLM 响应对象，
 不封装为 :class:`LLMResponse`。
@@ -41,7 +42,7 @@ class LLMResponse:
     Attributes:
         content: 已提取的回复文本（按模型类型自动选择提取策略）。
         usage: Token 用量统计，无 ``usage`` 字段时为零值。
-        cost: 成本估算（USD），无定价时为零值。
+        cost: 成本估算，无定价时为零值。
         model_code: 模型代码，用于日志定位。
         provider_code: 供应商代码，用于日志定位。
         latency_ms: 调用耗时（毫秒）。

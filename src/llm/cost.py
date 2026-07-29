@@ -1,17 +1,19 @@
 """LLM 调用 Token 消耗估算与成本计算。
 
-根据 LiteLLM 响应中的 ``usage`` 字段和模型的定价信息（USD），
+根据 LiteLLM 响应中的 ``usage`` 字段和模型的定价信息，
 计算单次调用的 Token 消耗和预估成本。
 
-定价单位为"每百万 token"的美元价格（与 ORM ``LlmModel`` 的
-``input_price_per_1m`` / ``output_price_per_1m`` 字段一致）。
+定价单位为"每百万 token"的价格（与 ORM ``LlmModel`` 的
+``input_price_per_1m`` / ``output_price_per_1m`` 字段一致），
+币种由 ``LlmModel.currency`` 字段决定（CNY / USD）。
 
 使用方式::
 
     from src.llm.cost import estimate_cost
 
     cost = estimate_cost(response, model)
-    print(cost.total_cost_usd)  # 0.0023
+    print(cost.total_cost)  # 0.0023
+    print(cost.currency)    # "CNY"
 """
 
 from __future__ import annotations
@@ -43,19 +45,21 @@ class TokenUsage:
 
 @dataclass(frozen=True)
 class CostEstimate:
-    """单次 LLM 调用的成本估算结果（USD）。
+    """单次 LLM 调用的成本估算结果。
 
     Attributes:
         usage: Token 用量统计。
-        input_cost_usd: 输入 token 成本（USD）。
-        output_cost_usd: 输出 token 成本（USD）。
-        total_cost_usd: 总成本（USD）。
+        input_cost: 输入 token 成本。
+        output_cost: 输出 token 成本。
+        total_cost: 总成本。
+        currency: 币种（CNY / USD），来自模型配置。
     """
 
     usage: TokenUsage
-    input_cost_usd: float
-    output_cost_usd: float
-    total_cost_usd: float
+    input_cost: float
+    output_cost: float
+    total_cost: float
+    currency: str = "CNY"
 
 
 def extract_usage(response: dict[str, object] | object) -> TokenUsage | None:
@@ -102,7 +106,7 @@ def estimate_cost(
     """根据 LLM 响应和模型定价计算成本。
 
     定价取自 ``model.input_price_per_1m`` / ``model.output_price_per_1m``
-    （每百万 token 的 USD 价格）。
+    （每百万 token 的价格），币种取自 ``model.currency``（CNY / USD）。
 
     若响应中无 ``usage`` 字段，返回零成本估算。
 
@@ -115,6 +119,8 @@ def estimate_cost(
     """
     usage = extract_usage(response)
 
+    currency = getattr(model, "currency", "CNY") or "CNY"
+
     if usage is None:
         logger.debug(
             "模型 %s 响应中无 usage 字段，返回零成本",
@@ -126,9 +132,10 @@ def estimate_cost(
                 completion_tokens=0,
                 total_tokens=0,
             ),
-            input_cost_usd=0.0,
-            output_cost_usd=0.0,
-            total_cost_usd=0.0,
+            input_cost=0.0,
+            output_cost=0.0,
+            total_cost=0.0,
+            currency=currency,
         )
 
     input_price = float(model.input_price_per_1m)
@@ -140,9 +147,10 @@ def estimate_cost(
 
     return CostEstimate(
         usage=usage,
-        input_cost_usd=round(input_cost, 6),
-        output_cost_usd=round(output_cost, 6),
-        total_cost_usd=round(total_cost, 6),
+        input_cost=round(input_cost, 6),
+        output_cost=round(output_cost, 6),
+        total_cost=round(total_cost, 6),
+        currency=currency,
     )
 
 

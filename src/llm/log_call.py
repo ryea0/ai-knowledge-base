@@ -83,7 +83,8 @@ def write_call_log(
     input_tokens = usage.prompt_tokens if usage else None
     output_tokens = usage.completion_tokens if usage else None
     total_tokens = usage.total_tokens if usage else None
-    cost_usd = cost.total_cost_usd if cost else None
+    cost_amount = cost.total_cost if cost else None
+    cost_currency = cost.currency if cost else None
 
     log = LlmCallLog(
         trace_id=trace_id,
@@ -93,7 +94,8 @@ def write_call_log(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
-        cost_usd=cost_usd,
+        cost_amount=cost_amount,
+        cost_currency=cost_currency,
         latency_ms=latency_ms,
         error_msg=error_msg,
     )
@@ -102,12 +104,13 @@ def write_call_log(
 
     logger.debug(
         "call_log 写入: provider_id=%d model_id=%d success=%s "
-        "tokens=%s cost=%s latency=%sms",
+        "tokens=%s cost=%s %s latency=%sms",
         provider_id,
         model_id,
         is_success,
         total_tokens,
-        cost_usd,
+        cost_amount,
+        cost_currency,
         latency_ms,
     )
 
