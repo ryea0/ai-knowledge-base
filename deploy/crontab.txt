@@ -1,0 +1,30 @@
+# ============================================================
+# AI 知识库定时采集与分析 crontab 配置
+# ============================================================
+#
+# 任务 1：每天早上 16:00（本地时间）运行 Step 1-2（采集 + 分析）
+#         - 数据源：github + rss
+#         - dry-run 模式，仅采集和分析，不写 knowledge/articles/
+#         - 日志追加到 logs/collect.log
+#
+# 任务 2：每周日上午 17:00 运行 Step 3-4（整理入库）
+#         - 非干跑模式，执行去重 + 格式化 + 保存
+#         - 日志追加到 logs/analyze.log
+#
+# 安装方式：
+#   crontab crontab.txt
+# 或手动编辑：
+#   crontab -e  然后将下面两行粘贴进去
+#
+# 查看已安装的定时任务：
+#   crontab -l
+#
+# 卸载：
+#   crontab -r
+# ============================================================
+
+# 分钟  小时  日  月  星期  命令
+# ---   ---  --  --  ----  ---
+  0     16    *   *   *     cd /home/ryea0/Project/ai-knowledge-base && /usr/local/bin/uv run python -m src.pipeline.pipeline --sources github,rss --limit 20 --dry-run --verbose >> logs/collect.log 2>&1
+
+  0     17   *   *   0     cd /home/ryea0/Project/ai-knowledge-base && /usr/local/bin/uv run python -m src.pipeline.pipeline --sources github,rss --limit 20 --verbose >> logs/analyze.log 2>&1
