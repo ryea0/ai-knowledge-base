@@ -42,6 +42,12 @@
   uv run pytest tests/ --cov=src --cov-fail-under=80
   ```
   工具链配置见 `pyproject.toml`（`[tool.ruff]` / `[tool.mypy]` / `[tool.pytest.ini_options]` / `[tool.coverage]`）。
+- **交付前检查清单**：除上述工具链检查外，Agent 须逐项确认以下清单：
+  1. **端到端验证**：CLI / 工作流入口须真实执行一次（非 mock），确认无导入错误、API 调用错误、解析错误。仅 mock 单测全绿不等于可用。
+  2. **读相关 spec**：涉及 CLI / 工作流入口须读 `docs/specs/trace-spec.md`；涉及 DB 读写须读 `docs/specs/db-conventions.md`；涉及前端须读 `docs/specs/frontend-spec.md`；涉及 LLM 须读 `docs/specs/llm-provider.md`。禁止凭猜测实现已有规范约束的行为。
+  3. **DDL 与 ORM 对齐检查**：新增 DB 写入逻辑前，须 grep 确认目标表是否已有 ORM 模型和写入调用链；新建 ORM 模型时须确认 `deploy/sql/` 中有对应 DDL。
+  4. **清理死代码**：交付前检查无被覆盖的变量赋值、未使用的 import、永远不会执行的语句。
+  5. **MySQL 验证测试**：涉及 DB 读写的功能，除 SQLite 内存数据库单测外，须连接真实 MySQL 执行一次写入/读取验证，确认 ORM 字段类型、DDL 约束、SQL 方言均正确。SQLite 与 MySQL 的类型映射差异（如 `Boolean` / `TINYINT`）可能导致 SQLite 通过但 MySQL 失败。
 
 ### 2.2 代码路径规范
 

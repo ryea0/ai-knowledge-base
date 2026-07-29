@@ -34,6 +34,7 @@ from src.llm.client import (
     chat_completion,
     chat_completion_with_retry,
 )
+from src.llm.orm import Base, LlmCallLog
 from src.llm.utils import sanitize_secrets
 from src.models.enums import LlmAuthType
 
@@ -735,3 +736,140 @@ class TestChatCompletionWithRetry:
         assert exc_info.value.error_type == LlmErrorType.UNKNOWN
         assert mock_completion.call_count == 1
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# chat_completion call_log 集成测试
+# ---------------------------------------------------------------------------
+
+
+class TestChatCompletionCallLog:
+    """chat_completion 调用日志写入测试。"""
+
+    def test_success_writes_call_log(self) -> None:
+        """成功调用写入 call_log，含 token 和 cost。"""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+
+        provider = _make_provider_mock()
+        model = _make_model_mock()
+        model.input_price_per_1m = 1.0
+        model.output_price_per_1m = 2.0
+        mock_response = {
+            "choices": [{"message": {"content": "hello"}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+        with patch("src.llm.client.litellm.completion") as mock_completion:
+            mock_completion.return_value = mock_response
+            result = chat_completion(
+                provider, model, [{"role": "user", "content": "hi"}],
+                session=session,
+            )
+
+        assert isinstance(result, LLMResponse)
+        logs = session.query(LlmCallLog).all()
+        assert len(logs) == 1
+        log = logs[0]
+        assert log.is_success == True  # noqa: E712
+        assert log.input_tokens == 10
+        assert log.output_tokens == 5
+        assert log.total_tokens == 15
+        assert log.error_msg is None
+        assert log.provider_id == 1
+        assert log.model_id == 1
+        session.close()
+
+    def test_failure_writes_call_log(self) -> None:
+        """失败调用写入 call_log，含 error_msg。"""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+
+        provider = _make_provider_mock()
+        model = _make_model_mock()
+
+        with patch("src.llm.client.litellm.completion") as mock_completion:
+            mock_completion.side_effect = RuntimeError("connection failed")
+            with pytest.raises(LlmCallError):
+                chat_completion(
+                    provider, model, [{"role": "user", "content": "hi"}],
+                    session=session,
+                )
+
+        logs = session.query(LlmCallLog).all()
+        assert len(logs) == 1
+        log = logs[0]
+        assert log.is_success == False  # noqa: E712
+        assert log.input_tokens is None
+        assert log.output_tokens is None
+        assert log.total_tokens is None
+        assert log.cost_usd is None
+        assert "connection failed" in (log.error_msg or "")
+        session.close()
+
+    def test_no_session_no_call_log(self) -> None:
+        """不传 session 时不写 call_log。"""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+
+        provider = _make_provider_mock()
+        model = _make_model_mock()
+        mock_response = {"choices": [{"message": {"content": "hello"}}]}
+
+        with patch("src.llm.client.litellm.completion") as mock_completion:
+            mock_completion.return_value = mock_response
+            chat_completion(
+                provider, model, [{"role": "user", "content": "hi"}],
+            )
+
+        logs = session.query(LlmCallLog).all()
+        assert len(logs) == 0
+        session.close()
+
+    def test_retry_writes_multiple_call_logs(self) -> None:
+        """重试时每次尝试都写一行 call_log。"""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        session = Session(engine)
+
+        provider = _make_provider_mock()
+        model = _make_model_mock()
+        mock_response = {"choices": [{"message": {"content": "ok"}}]}
+
+        with (
+            patch("src.llm.client.litellm.completion") as mock_completion,
+            patch("src.llm.client.time.sleep"),
+        ):
+            mock_completion.side_effect = [
+                _make_litellm_exc(litellm.exceptions.Timeout),
+                mock_response,
+            ]
+            chat_completion_with_retry(
+                provider, model, [{"role": "user", "content": "hi"}],
+                session=session,
+            )
+
+        logs = session.query(LlmCallLog).all()
+        assert len(logs) == 2
+        assert logs[0].is_success == False  # noqa: E712
+        assert logs[1].is_success == True  # noqa: E712
+        session.close()

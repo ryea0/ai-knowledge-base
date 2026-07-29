@@ -4,8 +4,10 @@
     - ``kb_llm_provider``: 供应商连接配置 + 鉴权信息（不含健康状态）
     - ``kb_llm_model``: 模型清单
     - ``kb_llm_health``: 模型级当前健康状态（upsert 语义）
+    - ``kb_llm_call_log``: LLM 调用计量日志（纯追加，每次调用一行）
 
-DDL 见 ``deploy/sql/01-03_*.sql``，约定见 docs/specs/llm-provider.md §9。
+DDL 见 ``deploy/sql/01-03_*.sql`` / ``deploy/sql/08_kb_llm_call_log.sql``，
+约定见 docs/specs/llm-provider.md §9。
 
 ``Base`` 和 ``BaseEntity`` 从 :mod:`src.common.base_entity` 导入并重新导出，
 保持 ``from src.llm.orm import Base`` 的向后兼容。
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Integer, Numeric, String
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.common.base_entity import Base, BaseEntity
@@ -26,7 +28,15 @@ from src.models.enums import (
     LlmProviderType,
 )
 
-__all__ = ["Base", "BaseEntity", "LlmHealth", "LlmModel", "LlmProvider", "LlmProviderConnectivity"]
+__all__ = [
+    "Base",
+    "BaseEntity",
+    "LlmCallLog",
+    "LlmHealth",
+    "LlmModel",
+    "LlmProvider",
+    "LlmProviderConnectivity",
+]
 
 
 class LlmProvider(BaseEntity):
@@ -249,3 +259,67 @@ class LlmProviderConnectivity(BaseEntity):
         DateTime(timezone=False), nullable=True
     )
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class LlmCallLog(Base):
+    """LLM 调用计量日志 ORM 模型，对应 ``kb_llm_call_log`` 表。
+
+    纯追加日志表，每次 LLM 调用（成功/失败）写一行，记录 token 用量和成本。
+    用于供应商成本追踪和用量分析。
+
+    不继承 :class:`BaseEntity`（无 ``updated_at`` / ``is_deleted`` 业务语义，
+    仅保留 ``is_deleted`` / ``deleted_at`` 供软删除清理）。
+
+    DDL 见 ``deploy/sql/08_kb_llm_call_log.sql``。
+
+    Attributes:
+        id: 自增主键。
+        trace_id: 链路追踪 ID，关联工作流执行。
+        provider_id: 供应商 ID。
+        model_id: 模型 ID。
+        is_success: 调用是否成功。
+        input_tokens: 输入 token 数，失败时为 None。
+        output_tokens: 输出 token 数，失败时为 None。
+        total_tokens: 总 token 数，失败时为 None。
+        cost_usd: 预估成本 USD，失败时为 None。
+        latency_ms: 响应延迟毫秒，失败时为 None。
+        error_msg: 失败原因（脱敏后），成功时为 None。
+        called_at: 调用时间。
+        is_deleted: 软删除标记。
+        deleted_at: 软删除时间。
+        created_at: 创建时间。
+        updated_at: 更新时间。
+    """
+
+    __tablename__ = "kb_llm_call_log"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    trace_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_success: Mapped[bool] = mapped_column(Integer, nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_msg: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    called_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), nullable=False, default=datetime.utcnow
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Integer, nullable=False, default=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), nullable=False, default=datetime.utcnow
+    )

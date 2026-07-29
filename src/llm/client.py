@@ -3,10 +3,11 @@
 通过 LiteLLM 的 ``completion()`` 函数统一调用多供应商 LLM，
 支持 OpenAI / DeepSeek / Ark / Qwen / Ollama / llama.cpp 等。
 
-调用成功/失败后须通知 :mod:`src.llm.health` 更新供应商健康状态。
+    调用成功/失败后须通知 :mod:`src.llm.health` 更新供应商健康状态，
+    并在 ``kb_llm_call_log`` 表写入一行调用计量日志（token 用量 / 成本 / 延迟）。
 
-鉴权统一通过 :mod:`src.llm.auth_adapter` 的 :func:`build_auth_context` 构造，
-不再直接调用 :mod:`src.llm.crypto` 解密。
+    鉴权统一通过 :mod:`src.llm.auth_adapter` 的 :func:`build_auth_context` 构造，
+    不再直接调用 :mod:`src.llm.crypto` 解密。
 
 异常分类与重试策略（策略模式）：
     - ``TIMEOUT``        -- 请求超时，可重试，指数退避
@@ -250,7 +251,7 @@ def chat_completion(
         temperature: 采样温度，默认 0.7。
         max_tokens: 最大输出 tokens，None 则使用模型默认值。
         stream: 是否流式输出。
-        session: 可选的 SQLAlchemy Session，传入则联动健康状态更新。
+        session: 可选的 SQLAlchemy Session，传入则联动健康状态更新和调用日志写入。
         **kwargs: 透传给 LiteLLM ``completion()`` 的额外参数。
 
     Returns:
@@ -308,11 +309,20 @@ def chat_completion(
         )
         if session is not None:
             from src.llm.health import record_failure
+            from src.llm.log_call import write_call_log
 
             record_failure(
                 session,
                 provider_id=provider.id,
                 model_id=model.id,
+                error_msg=sanitized,
+            )
+            write_call_log(
+                session,
+                provider_id=provider.id,
+                model_id=model.id,
+                is_success=False,
+                latency_ms=latency_ms,
                 error_msg=sanitized,
             )
         raise LlmCallError(
@@ -329,8 +339,37 @@ def chat_completion(
         model.model_code,
         latency_ms,
     )
+
+    if stream:
+        if session is not None:
+            from src.llm.health import record_success
+            from src.llm.log_call import write_call_log
+
+            record_success(
+                session,
+                provider_id=provider.id,
+                model_id=model.id,
+                latency_ms=latency_ms,
+            )
+            write_call_log(
+                session,
+                provider_id=provider.id,
+                model_id=model.id,
+                is_success=True,
+                latency_ms=latency_ms,
+            )
+        return response  # type: ignore[no-any-return]
+
+    llm_response = LLMResponse.from_litellm_response(
+        response,
+        model,
+        provider_code=provider.provider_code,
+        latency_ms=latency_ms,
+    )
+
     if session is not None:
         from src.llm.health import record_success
+        from src.llm.log_call import write_call_log
 
         record_success(
             session,
@@ -338,16 +377,17 @@ def chat_completion(
             model_id=model.id,
             latency_ms=latency_ms,
         )
+        write_call_log(
+            session,
+            provider_id=provider.id,
+            model_id=model.id,
+            is_success=True,
+            usage=llm_response.usage,
+            cost=llm_response.cost,
+            latency_ms=latency_ms,
+        )
 
-    if stream:
-        return response  # type: ignore[no-any-return]
-
-    return LLMResponse.from_litellm_response(
-        response,
-        model,
-        provider_code=provider.provider_code,
-        latency_ms=latency_ms,
-    )
+    return llm_response
 
 
 def chat_completion_with_retry(
@@ -376,7 +416,9 @@ def chat_completion_with_retry(
         temperature: 采样温度。
         max_tokens: 最大输出 tokens。
         stream: 是否流式输出。
-        session: 可选的 SQLAlchemy Session，传入则联动健康状态更新。
+        session: 可选的 SQLAlchemy Session，传入则联动健康状态更新和调用日志写入。
+            每次 ``chat_completion`` 尝试（含重试）都会写一行 call_log。
+
         **kwargs: 透传给 LiteLLM 的额外参数。
 
     Returns:

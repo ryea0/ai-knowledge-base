@@ -14,6 +14,7 @@
     - ``response_extractor``: LLM 响应内容提取器（策略模式，适配推理/非推理模型）
     - ``router``: 供应商路由，按优先级 + 健康状态选择可用供应商
     - ``health``: 健康检查服务，类熔断器状态机 + 日志记录
+    - ``log_call``: LLM 调用计量日志写入（token / 成本 / 延迟）
     - ``service``: 供应商/模型 CRUD + 模型发现服务
 """
 
@@ -21,6 +22,7 @@ from src.llm.auth_adapter import AuthContext, build_auth_context, build_httpx_he
 from src.llm.client import LLMResponse, chat_completion, quick_chat
 from src.llm.connectivity import ConnectivityResult, test_connectivity
 from src.llm.cost import CostEstimate, TokenUsage, estimate_cost, extract_usage
+from src.llm.log_call import write_call_log
 from src.llm.metadata_extractor import (
     ArkModelMetadataExtractor,
     LlamaCppModelMetadataExtractor,
@@ -31,7 +33,7 @@ from src.llm.metadata_extractor import (
     get_metadata_extractor,
     merge_metadata,
 )
-from src.llm.orm import LlmHealth, LlmModel, LlmProvider
+from src.llm.orm import LlmCallLog, LlmHealth, LlmModel, LlmProvider
 from src.llm.response_extractor import extract_content
 from src.llm.router import select_first_available
 from src.llm.schemas import (
@@ -69,6 +71,7 @@ __all__ = [
     "HealthResponse",
     "LLMResponse",
     "LlamaCppModelMetadataExtractor",
+    "LlmCallLog",
     "LlmHealth",
     "LlmModel",
     "LlmProvider",
@@ -107,4 +110,5 @@ __all__ = [
     "test_connectivity",
     "update_model",
     "update_provider",
+    "write_call_log",
 ]

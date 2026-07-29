@@ -12,7 +12,7 @@ from __future__ import annotations
 from sqlalchemy import inspect
 
 from src.common.base_entity import Base, BaseEntity
-from src.llm.orm import LlmHealth, LlmModel, LlmProvider
+from src.llm.orm import LlmCallLog, LlmHealth, LlmModel, LlmProvider
 from src.models.article import Article  # noqa: F401 -- 注册到 Base.metadata
 from src.models.enums import ArticleStatus
 
@@ -152,6 +152,43 @@ class TestLlmHealth:
         assert issubclass(LlmHealth, Base)
 
 
+class TestLlmCallLog:
+    """LlmCallLog ORM 模型测试。"""
+
+    def test_tablename(self) -> None:
+        """表名为 kb_llm_call_log。"""
+        assert LlmCallLog.__tablename__ == "kb_llm_call_log"
+
+    def test_has_required_columns(self) -> None:
+        """包含所有必要字段。"""
+        mapper = inspect(LlmCallLog)
+        column_names = {c.key for c in mapper.columns}
+        required = {
+            "id",
+            "trace_id",
+            "provider_id",
+            "model_id",
+            "is_success",
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cost_usd",
+            "latency_ms",
+            "error_msg",
+            "called_at",
+            "is_deleted",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        }
+        assert required.issubset(column_names)
+
+    def test_inherits_base_not_base_entity(self) -> None:
+        """继承 Base（纯追加日志表），不继承 BaseEntity。"""
+        assert issubclass(LlmCallLog, Base)
+        assert not issubclass(LlmCallLog, BaseEntity)
+
+
 class TestArticle:
     """Article ORM 模型测试。"""
 
@@ -214,6 +251,7 @@ class TestBase:
         assert "kb_llm_provider" in table_names
         assert "kb_llm_model" in table_names
         assert "kb_llm_health" in table_names
+        assert "kb_llm_call_log" in table_names
         assert "kb_article" in table_names
 
 
