@@ -9,7 +9,7 @@
     - ``workflow``: LangGraph 图构建与编译
 """
 
-from src.graph.state import WorkflowState
+from src.graph.state import KBState, WorkflowState
 from src.graph.workflow import build_workflow
 
-__all__ = ["WorkflowState", "build_workflow"]
+__all__ = ["KBState", "WorkflowState", "build_workflow"]
