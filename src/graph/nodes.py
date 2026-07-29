@@ -21,15 +21,13 @@ import json
 import logging
 import os
 import tempfile
-import urllib.error
-import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from src.collectors import default_registry
 from src.common.cost_guard import BudgetExceededError, get_cost_guard
 from src.common.trace import set_trace_id
 from src.config.database import get_session_factory, session_scope
@@ -37,7 +35,6 @@ from src.graph.state import KBState
 from src.llm.client import LlmCallError, chat_completion_with_retry
 from src.llm.cost import TokenUsage
 from src.llm.response import LLMResponse
-from src.llm.retry_decorator import with_retry
 from src.llm.router import select_first_available
 from src.models.article import Article
 from src.models.enums import ArticleStatus
@@ -48,16 +45,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
-
-_GITHUB_API_URL = "https://api.github.com/search/repositories"
-_GITHUB_AI_QUERY = (
-    "AI OR LLM OR agent OR RAG OR transformer "
-    "OR fine-tuning OR multimodal OR embedding"
-)
-_GITHUB_PER_PAGE = 10
-_GITHUB_SORT = "stars"
-_GITHUB_ORDER = "desc"
-_HTTP_TIMEOUT = 30
 
 _MIN_SCORE = 0.6
 _MAX_ITERATIONS = 3
@@ -134,30 +121,6 @@ def _set_trace_from_state(state: KBState) -> None:
     """
     trace_id = state.get("trace_id", "-")
     set_trace_id(trace_id)
-
-
-def _append_error(
-    state: KBState, node: str, error: str
-) -> list[dict[str, Any]]:
-    """向 errors 列表追加一条错误记录。
-
-    Args:
-        state: 当前工作流状态。
-        node: 出错节点名称。
-        error: 错误消息。
-
-    Returns:
-        更新后的 errors 列表。
-    """
-    errors: list[dict[str, Any]] = list(state.get("errors", []))
-    errors.append(
-        {
-            "node": node,
-            "error": error,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-    )
-    return errors
 
 
 def _parse_json_output(raw: str, context: str) -> dict[str, Any]:
@@ -347,60 +310,15 @@ def _call_llm_json(
 # ---------------------------------------------------------------------------
 
 
-def _fetch_github_repos() -> list[dict[str, Any]]:
-    """调用 GitHub Search API 采集 AI 相关仓库。
-
-    使用 ``urllib.request`` 请求 GitHub Search API，
-    按 star 数降序排列，取前 ``_GITHUB_PER_PAGE`` 条。
-
-    Returns:
-        采集到的数据源摘要列表。
-    """
-    params = urllib.parse.urlencode(
-        {
-            "q": _GITHUB_AI_QUERY,
-            "sort": _GITHUB_SORT,
-            "order": _GITHUB_ORDER,
-            "per_page": _GITHUB_PER_PAGE,
-        }
-    )
-    url = f"{_GITHUB_API_URL}?{params}"
-
-    headers: dict[str, str] = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "ai-knowledge-base",
-    }
-    github_token = os.environ.get("GITHUB_TOKEN")
-    if github_token:
-        headers["Authorization"] = f"Bearer {github_token}"
-
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310
-        data = json.loads(resp.read().decode("utf-8"))
-
-    sources: list[dict[str, Any]] = []
-    for repo in data.get("items", []):
-        sources.append(
-            {
-                "title": repo.get("full_name", ""),
-                "url": repo.get("html_url", ""),
-                "source_platform": "github_trending",
-                "source_score": repo.get("stargazers_count", 0),
-                "summary": repo.get("description", ""),
-                "content_path": "",
-            }
-        )
-    return sources
-
-
 def collect_node(state: KBState) -> dict[str, Any]:
-    """采集节点：调用 GitHub Search API 采集 AI 相关仓库。
+    """采集节点：从所有已注册采集器聚合候选条目。
 
-    使用 ``urllib.request`` 直接请求 GitHub Search API，
-    按 star 数降序排列，取前 ``_GITHUB_PER_PAGE`` 条。
-    采集结果写入 ``sources`` 字段。
-    网络错误通过 ``@with_retry`` 指数退避重试（最多 3 次）。
-    若重试耗尽仍失败，将错误写入 ``errors`` 字段并返回空列表。
+    遍历 :data:`src.collectors.default_registry` 中的全部采集器（GitHub、RSS 等），
+    逐个调用 ``collect()``，将结果合并到 ``sources`` 列表。
+    单个采集器失败不阻塞其他采集器，错误记入 ``errors``。
+
+    可扩展：新增数据源只需在 ``src/collectors/`` 注册采集器，
+    本节点自动发现并调用，无需修改图结构。
 
     Args:
         state: 当前工作流状态（本节点不读取任何字段）。
@@ -409,39 +327,34 @@ def collect_node(state: KBState) -> dict[str, Any]:
         状态更新 dict，包含 ``sources``，可能包含 ``errors``。
     """
     _set_trace_from_state(state)
-    logger.info("启动 GitHub 仓库采集")
 
-    errors: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = list(state.get("errors", []))
     sources: list[dict[str, Any]] = []
-    try:
-        sources = _fetch_github_repos_with_retry()
-        logger.info("采集完成, 共 %d 条", len(sources))
-    except (urllib.error.URLError, OSError) as exc:
-        logger.error("GitHub API 请求失败: %s", exc, exc_info=True)
-        errors = _append_error(state, "collect", str(exc))
-    except (json.JSONDecodeError, KeyError) as exc:
-        logger.error("GitHub API 响应解析失败: %s", exc, exc_info=True)
-        errors = _append_error(state, "collect", str(exc))
+
+    collectors = default_registry.get_all()
+    logger.info("启动采集, 已注册采集器: %s", default_registry.names())
+
+    for name, collector in collectors:
+        try:
+            items = collector.collect()
+            sources.extend(items)
+            logger.info("采集器 %s: %d 条", name, len(items))
+        except Exception as exc:
+            logger.error("采集器 %s 失败: %s", name, exc, exc_info=True)
+            errors.append(
+                {
+                    "node": "collect",
+                    "error": f"[{name}] {exc}",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+
+    logger.info("采集完成, 共 %d 条", len(sources))
 
     result: dict[str, Any] = {"sources": sources}
     if errors:
         result["errors"] = errors
     return result
-
-
-@with_retry(
-    retry_on=(urllib.error.URLError, OSError),
-    max_attempts=3,
-    base_delay=1.0,
-    max_delay=60.0,
-)
-def _fetch_github_repos_with_retry() -> list[dict[str, Any]]:
-    """带重试的 GitHub 仓库采集。
-
-    Returns:
-        采集到的数据源摘要列表。
-    """
-    return _fetch_github_repos()
 
 
 # ---------------------------------------------------------------------------

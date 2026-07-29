@@ -15,7 +15,6 @@ import json
 import os
 import tempfile
 from unittest.mock import MagicMock, patch
-from urllib.error import URLError
 
 from src.graph.nodes import (
     _accumulate_usage,
@@ -194,9 +193,11 @@ class TestCollectNode:
             },
         ]
 
+        mock_collector = MagicMock()
+        mock_collector.collect.return_value = mock_sources
         with patch(
-            "src.graph.nodes._fetch_github_repos_with_retry",
-            return_value=mock_sources,
+            "src.graph.nodes.default_registry.get_all",
+            return_value=[("github", mock_collector)],
         ):
             result = collect_node({})
 
@@ -207,10 +208,12 @@ class TestCollectNode:
         assert result["sources"][0]["source_platform"] == "github_trending"
 
     def test_collect_network_error(self) -> None:
-        """网络错误时返回空 sources 和 errors。"""
+        """采集器失败时返回空 sources 和 errors。"""
+        mock_collector = MagicMock()
+        mock_collector.collect.side_effect = RuntimeError("network error")
         with patch(
-            "src.graph.nodes._fetch_github_repos_with_retry",
-            side_effect=URLError("network error"),
+            "src.graph.nodes.default_registry.get_all",
+            return_value=[("github", mock_collector)],
         ):
             result = collect_node({})
         assert result["sources"] == []
@@ -220,12 +223,77 @@ class TestCollectNode:
 
     def test_collect_empty_response(self) -> None:
         """空响应返回空 sources。"""
+        mock_collector = MagicMock()
+        mock_collector.collect.return_value = []
         with patch(
-            "src.graph.nodes._fetch_github_repos_with_retry",
-            return_value=[],
+            "src.graph.nodes.default_registry.get_all",
+            return_value=[("github", mock_collector)],
         ):
             result = collect_node({})
         assert result["sources"] == []
+
+    def test_collect_multi_source(self) -> None:
+        """多采集器聚合：github + rss 结果合并。"""
+        github_items = [
+            {
+                "title": "repo1",
+                "url": "https://github.com/repo1",
+                "source_platform": "github_trending",
+                "source_score": 100,
+                "summary": "GitHub repo",
+                "content_path": "",
+            },
+        ]
+        rss_items = [
+            {
+                "title": "AI News",
+                "url": "https://hn.example.com/123",
+                "source_platform": "hackernews",
+                "source_score": 0,
+                "summary": "RSS article",
+                "content_path": "",
+            },
+        ]
+        mock_github = MagicMock()
+        mock_github.collect.return_value = github_items
+        mock_rss = MagicMock()
+        mock_rss.collect.return_value = rss_items
+        with patch(
+            "src.graph.nodes.default_registry.get_all",
+            return_value=[("github", mock_github), ("rss", mock_rss)],
+        ):
+            result = collect_node({})
+
+        assert len(result["sources"]) == 2
+        assert result["sources"][0]["source_platform"] == "github_trending"
+        assert result["sources"][1]["source_platform"] == "hackernews"
+
+    def test_collect_partial_failure(self) -> None:
+        """一个采集器失败不阻塞其他采集器。"""
+        good_items = [
+            {
+                "title": "repo1",
+                "url": "https://github.com/repo1",
+                "source_platform": "github_trending",
+                "source_score": 100,
+                "summary": "GitHub repo",
+                "content_path": "",
+            },
+        ]
+        mock_good = MagicMock()
+        mock_good.collect.return_value = good_items
+        mock_bad = MagicMock()
+        mock_bad.collect.side_effect = RuntimeError("RSS timeout")
+        with patch(
+            "src.graph.nodes.default_registry.get_all",
+            return_value=[("github", mock_good), ("rss", mock_bad)],
+        ):
+            result = collect_node({})
+
+        assert len(result["sources"]) == 1
+        assert "errors" in result
+        assert len(result["errors"]) == 1
+        assert "[rss]" in result["errors"][0]["error"]
 
 
 # ---------------------------------------------------------------------------
