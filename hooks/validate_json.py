@@ -60,8 +60,8 @@ VALID_CATEGORIES: set[str] = {
 # language 合法取值（对齐 §4）
 VALID_LANGUAGES: set[str] = {"zh", "en"}
 
-# article_id 格式：kb-YYYYMMDD-NNNN（对齐 §4 与 §7.5）
-ARTICLE_ID_PATTERN = re.compile(r"^kb-\d{8}-\d{4}$")
+# article_id 格式：kb-YYYYMMDD-NNNN（DB 模式）或 kb-YYYYMMDD-XXXXXXXX（pipeline 独立模式）
+ARTICLE_ID_PATTERN = re.compile(r"^kb-\d{8}-([0-9a-f]{4}|[0-9a-f]{8})$")
 
 # URL 格式：http(s)://...
 URL_PATTERN = re.compile(r"^https?://.+")

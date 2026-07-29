@@ -75,8 +75,10 @@ class Organizer:
             return None
 
         article_id = self._generate_article_id()
-        collected_at = collected_meta.get("collected_at", datetime.now(UTC).isoformat())
-        analyzed_at = datetime.now(UTC).isoformat()
+        collected_at = collected_meta.get(
+            "collected_at", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+        analyzed_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         content_path = self._write_raw_content(article_id, collected_meta)
         relative_content_path = self._relative_to_project(content_path)

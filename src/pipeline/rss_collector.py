@@ -55,6 +55,32 @@ _SUMMARY_PATTERN = re.compile(
 
 _MIN_INTERVAL = 1.0
 
+_SOURCE_PLATFORM_MAP: dict[str, str] = {
+    "Hacker News Best": "hackernews",
+    "Lobsters AI/ML": "hackernews",
+    "OpenAI Blog": "hackernews",
+    "Anthropic Research": "hackernews",
+    "Hugging Face Blog": "hackernews",
+    "arXiv cs.AI": "hackernews",
+    "机器之心": "hackernews",
+    "量子位": "hackernews",
+}
+
+
+def _map_source_platform(source_name: str) -> str:
+    """将 RSS 源名称映射为标准 source_platform 枚举值。
+
+    RSS 源不属于 github_trending，统一映射为 hackernews
+    （符合 SourcePlatform 枚举的广义「社区/新闻源」语义）。
+
+    Args:
+        source_name: RSS 配置中的源名称。
+
+    Returns:
+        标准 source_platform 字符串。
+    """
+    return _SOURCE_PLATFORM_MAP.get(source_name, "hackernews")
+
 
 class RSSCollector:
     """RSS 源采集器。
@@ -246,7 +272,7 @@ class RSSCollector:
             条目列表，每条含 title/url/source/popularity/summary/collected_at。
         """
         results: list[dict[str, Any]] = []
-        collected_at = datetime.now(UTC).isoformat()
+        collected_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         items = _RSS_ITEM_PATTERN.findall(xml_content)
         is_atom = False
@@ -269,7 +295,7 @@ class RSSCollector:
             results.append({
                 "title": self._clean_text(title),
                 "url": url.strip(),
-                "source": source_name,
+                "source": _map_source_platform(source_name),
                 "popularity": 0,
                 "summary": self._clean_text(summary),
                 "collected_at": collected_at,

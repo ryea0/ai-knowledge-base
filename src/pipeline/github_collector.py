@@ -133,7 +133,7 @@ class GitHubCollector:
                 "source": "github",
                 "popularity": stars,
                 "summary": description,
-                "collected_at": datetime.now(UTC).isoformat(),
+                "collected_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             })
 
         logger.info("GitHub 采集完成: %d 条候选", len(results))

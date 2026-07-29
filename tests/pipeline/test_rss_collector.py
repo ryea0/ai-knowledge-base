@@ -84,7 +84,7 @@ class TestRSSXMLParsing:
         assert len(results) == 2
         assert results[0]["title"] == "GPT-5 Released with Multimodal Capabilities"
         assert results[0]["url"] == "https://example.com/gpt5"
-        assert results[0]["source"] == "Test Feed"
+        assert results[0]["source"] == "hackernews"
         assert results[0]["popularity"] == 0
         assert "collected_at" in results[0]
 
@@ -163,7 +163,7 @@ class TestRSSCollect:
         results = collector.collect()
 
         assert len(results) == 4
-        assert all(r["source"] in ("Test Feed", "Another Feed") for r in results)
+        assert all(r["source"] == "hackernews" for r in results)
 
     @patch("src.pipeline.rss_collector.httpx.get")
     def test_collect_skips_failed_source(

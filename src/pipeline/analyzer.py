@@ -263,6 +263,14 @@ class LLMAnalyzer:
         if not tags:
             tags = ["ai"]
 
+        while len(tags) < 3:
+            for fallback_tag in ("ai", "llm", "news"):
+                if fallback_tag not in tags:
+                    tags.append(fallback_tag)
+                    break
+            else:
+                break
+
         return {
             "summary": summary or item.get("title", ""),
             "highlights": [],
