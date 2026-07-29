@@ -3,9 +3,9 @@
 测试覆盖：
 - KBState TypedDict 结构
 - build_graph 编译后的图可执行（mock 节点）
-- 审核通过路径（review -> save -> END）
-- 审核不通过路径（review -> organize 循环）
-- iteration 安全网路由（iteration >= 3 时强制走向 save）
+- 审核通过路径（review -> organize -> save -> END）
+- 审核不通过 -> 修订 -> 再审核通过（review -> revise -> review -> organize -> save）
+- iteration 达上限 -> 人工标记（review -> human_flag -> END）
 """
 
 from __future__ import annotations
@@ -51,22 +51,24 @@ class TestBuildGraph:
         assert app is not None
 
     def test_graph_pass_path(self) -> None:
-        """审核通过路径：collect -> analyze -> organize -> review -> save。"""
+        """审核通过路径：collect -> analyze -> review -> organize -> save。"""
         with (
             patch("src.graph.graph.collect_node") as mock_collect,
             patch("src.graph.graph.analyze_node") as mock_analyze,
-            patch("src.graph.graph.organize_node") as mock_organize,
             patch("src.graph.graph.review_node") as mock_review,
+            patch("src.graph.graph.organize_node") as mock_organize,
+            patch("src.graph.graph.revise_node") as mock_revise,
             patch("src.graph.graph.save_node") as mock_save,
+            patch("src.graph.graph.human_flag_node") as mock_flag,
         ):
             mock_collect.return_value = {"sources": [{"title": "t"}]}
             mock_analyze.return_value = {"analyses": [{"title": "t", "score": 0.8}]}
-            mock_organize.return_value = {"articles": [{"article_id": "kb-1"}]}
             mock_review.return_value = {
                 "review_passed": True,
                 "review_feedback": "",
                 "iteration": 1,
             }
+            mock_organize.return_value = {"articles": [{"article_id": "kb-1"}]}
             mock_save.return_value = {"saved_count": 1}
 
             app = build_graph()
@@ -75,14 +77,12 @@ class TestBuildGraph:
             assert result["review_passed"] is True
             assert result["saved_count"] == 1
             mock_save.assert_called_once()
+            mock_revise.assert_not_called()
+            mock_flag.assert_not_called()
 
-    def test_graph_fail_then_pass(self) -> None:
-        """审核不通过 -> 回到 organize -> 再审核通过。"""
-        call_count = {"organize": 0, "review": 0}
-
-        def mock_organize_fn(state: KBState) -> dict:
-            call_count["organize"] += 1
-            return {"articles": [{"article_id": "kb-1"}]}
+    def test_graph_revise_then_pass(self) -> None:
+        """审核不通过 -> 修订 -> 再审核通过。"""
+        call_count = {"review": 0, "revise": 0}
 
         def mock_review_fn(state: KBState) -> dict:
             call_count["review"] += 1
@@ -98,48 +98,60 @@ class TestBuildGraph:
                 "iteration": 2,
             }
 
+        def mock_revise_fn(state: KBState) -> dict:
+            call_count["revise"] += 1
+            return {"analyses": [{"title": "t", "score": 0.9}]}
+
         with (
             patch("src.graph.graph.collect_node") as mock_collect,
             patch("src.graph.graph.analyze_node") as mock_analyze,
-            patch("src.graph.graph.organize_node", side_effect=mock_organize_fn),
             patch("src.graph.graph.review_node", side_effect=mock_review_fn),
+            patch("src.graph.graph.revise_node", side_effect=mock_revise_fn),
+            patch("src.graph.graph.organize_node") as mock_organize,
             patch("src.graph.graph.save_node") as mock_save,
+            patch("src.graph.graph.human_flag_node") as mock_flag,
         ):
             mock_collect.return_value = {"sources": [{"title": "t"}]}
             mock_analyze.return_value = {"analyses": [{"title": "t"}]}
+            mock_organize.return_value = {"articles": [{"article_id": "kb-1"}]}
             mock_save.return_value = {"saved_count": 1}
 
             app = build_graph()
             result = app.invoke({})
 
-            assert call_count["organize"] == 2
             assert call_count["review"] == 2
+            assert call_count["revise"] == 1
             assert result["review_passed"] is True
             assert result["saved_count"] == 1
+            mock_flag.assert_not_called()
 
     def test_graph_iteration_safety_net(self) -> None:
-        """iteration >= 3 时即使 review 未通过也强制走向 save。"""
+        """iteration >= 3 时审核未通过走向 human_flag 而非 save。"""
         with (
             patch("src.graph.graph.collect_node") as mock_collect,
             patch("src.graph.graph.analyze_node") as mock_analyze,
-            patch("src.graph.graph.organize_node") as mock_organize,
             patch("src.graph.graph.review_node") as mock_review,
+            patch("src.graph.graph.organize_node") as mock_organize,
+            patch("src.graph.graph.revise_node") as mock_revise,
             patch("src.graph.graph.save_node") as mock_save,
+            patch("src.graph.graph.human_flag_node") as mock_flag,
         ):
             mock_collect.return_value = {"sources": [{"title": "t"}]}
             mock_analyze.return_value = {"analyses": [{"title": "t"}]}
             mock_organize.return_value = {"articles": [{"article_id": "kb-1"}]}
-            # review 未通过但 iteration 达到上限
             mock_review.return_value = {
                 "review_passed": False,
                 "review_feedback": "仍需改进",
                 "iteration": 3,
             }
             mock_save.return_value = {"saved_count": 1}
+            mock_flag.return_value = {"human_flagged": True}
 
             app = build_graph()
             result = app.invoke({})
 
             assert result["review_passed"] is False
-            assert result["saved_count"] == 1
-            mock_save.assert_called_once()
+            assert result.get("human_flagged") is True
+            mock_save.assert_not_called()
+            mock_revise.assert_not_called()
+            mock_flag.assert_called_once()

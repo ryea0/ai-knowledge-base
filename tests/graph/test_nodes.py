@@ -19,6 +19,7 @@ from urllib.error import URLError
 
 from src.graph.nodes import (
     _accumulate_usage,
+    _compute_weighted_score,
     _parse_json_output,
     _safe_float,
     _to_article_dict,
@@ -28,6 +29,7 @@ from src.graph.nodes import (
     review_node,
     save_node,
 )
+from src.llm.client import LlmCallError
 from src.llm.cost import TokenUsage
 
 # ---------------------------------------------------------------------------
@@ -410,28 +412,120 @@ class TestOrganizeNode:
 # ---------------------------------------------------------------------------
 
 
+class TestComputeWeightedScore:
+    """_compute_weighted_score 测试。"""
+
+    def test_perfect_scores(self) -> None:
+        """全 10 分时加权总分为 10.0。"""
+        scores = {
+            "summary_quality": 10,
+            "technical_depth": 10,
+            "relevance": 10,
+            "originality": 10,
+            "formatting": 10,
+        }
+        assert _compute_weighted_score(scores) == 10.0
+
+    def test_all_zero(self) -> None:
+        """全 0 分时加权总分为 0.0。"""
+        scores = {
+            "summary_quality": 0,
+            "technical_depth": 0,
+            "relevance": 0,
+            "originality": 0,
+            "formatting": 0,
+        }
+        assert _compute_weighted_score(scores) == 0.0
+
+    def test_weighted_calculation(self) -> None:
+        """验证加权计算正确性。"""
+        scores = {
+            "summary_quality": 8,   # 8 * 0.25 = 2.0
+            "technical_depth": 6,   # 6 * 0.25 = 1.5
+            "relevance": 7,         # 7 * 0.20 = 1.4
+            "originality": 5,       # 5 * 0.15 = 0.75
+            "formatting": 9,        # 9 * 0.15 = 1.35
+        }                          # total = 7.0
+        assert _compute_weighted_score(scores) == 7.0
+
+    def test_missing_dimension_treated_as_zero(self) -> None:
+        """缺失维度按 0 分处理。"""
+        scores = {
+            "summary_quality": 10,  # 10 * 0.25 = 2.5
+            "technical_depth": 10,  # 10 * 0.25 = 2.5
+            # relevance missing -> 0 * 0.20 = 0
+            "originality": 10,      # 10 * 0.15 = 1.5
+            "formatting": 10,       # 10 * 0.15 = 1.5
+        }                          # total = 8.0
+        assert _compute_weighted_score(scores) == 8.0
+
+    def test_clamp_above_10(self) -> None:
+        """超过 10 的分数被 clamp 到 10。"""
+        scores = {
+            "summary_quality": 15,
+            "technical_depth": 20,
+            "relevance": 10,
+            "originality": 10,
+            "formatting": 10,
+        }
+        assert _compute_weighted_score(scores) == 10.0
+
+    def test_clamp_below_0(self) -> None:
+        """负分被 clamp 到 0。"""
+        scores = {
+            "summary_quality": -5,
+            "technical_depth": 10,
+            "relevance": 10,
+            "originality": 10,
+            "formatting": 10,
+        }
+        # summary_quality=0, others=10: 0*0.25 + 10*0.25 + 10*0.20 + 10*0.15 + 10*0.15
+        # = 0 + 2.5 + 2.0 + 1.5 + 1.5 = 7.5
+        assert _compute_weighted_score(scores) == 7.5
+
+    def test_string_scores(self) -> None:
+        """字符串数字也能正确转换。"""
+        scores = {
+            "summary_quality": "8",
+            "technical_depth": "6",
+            "relevance": "7",
+            "originality": "5",
+            "formatting": "9",
+        }
+        assert _compute_weighted_score(scores) == 7.0
+
+
+# ---------------------------------------------------------------------------
+# review_node 测试
+# ---------------------------------------------------------------------------
+
+
 class TestReviewNode:
     """review_node 测试。"""
 
     def test_force_pass_at_max_iteration(self) -> None:
-        """iteration >= 3 时强制通过，不调用 LLM，iteration 不递增。"""
+        """iteration >= 3 时不调 LLM，返回 review_passed=False（转人工标记）。"""
         with patch("src.graph.nodes._get_session") as mock_session:
             result = review_node({
-                "articles": [{"article_id": "kb-1"}],
+                "analyses": [{"title": "a"}],
                 "iteration": 3,
             })
             mock_session.assert_not_called()
-        assert result["review_passed"] is True
-        assert result["review_feedback"] == ""
+        assert result["review_passed"] is False
+        assert "人工" in result["review_feedback"]
         assert result["iteration"] == 3
 
     def test_force_pass_at_iteration_2(self) -> None:
         """iteration=2 不是强制通过（需要 >= _MAX_ITERATIONS=3）。"""
         mock_result = {
-            "passed": False,
-            "overall_score": 5.0,
+            "scores": {
+                "summary_quality": 4,
+                "technical_depth": 5,
+                "relevance": 4,
+                "originality": 5,
+                "formatting": 5,
+            },
             "feedback": "需要改进",
-            "scores": {},
         }
         mock_usage = TokenUsage(50, 20, 70)
         with (
@@ -443,7 +537,7 @@ class TestReviewNode:
         ):
             mock_session.return_value = mock_session
             result = review_node({
-                "articles": [{"article_id": "kb-1"}],
+                "analyses": [{"title": "a"}],
                 "iteration": 2,
             })
         assert result["review_passed"] is False
@@ -451,12 +545,16 @@ class TestReviewNode:
         mock_session.close.assert_called_once()
 
     def test_review_passed(self) -> None:
-        """审核通过时 review_passed=True, feedback 清空。"""
+        """高分时 review_passed=True, feedback 清空。"""
         mock_result = {
-            "passed": True,
-            "overall_score": 8.5,
+            "scores": {
+                "summary_quality": 9,
+                "technical_depth": 8,
+                "relevance": 9,
+                "originality": 7,
+                "formatting": 8,
+            },
             "feedback": "质量很好",
-            "scores": {},
         }
         mock_usage = TokenUsage(50, 20, 70)
         with (
@@ -468,19 +566,23 @@ class TestReviewNode:
         ):
             mock_session.return_value = mock_session
             result = review_node({
-                "articles": [{"article_id": "kb-1"}],
+                "analyses": [{"title": "a"}],
                 "iteration": 1,
             })
         assert result["review_passed"] is True
         assert result["review_feedback"] == ""
 
     def test_review_not_passed(self) -> None:
-        """审核不通过时 review_passed=False, feedback 保留。"""
+        """低分时 review_passed=False, feedback 保留。"""
         mock_result = {
-            "passed": False,
-            "overall_score": 4.0,
+            "scores": {
+                "summary_quality": 3,
+                "technical_depth": 4,
+                "relevance": 3,
+                "originality": 4,
+                "formatting": 5,
+            },
             "feedback": "摘要过短",
-            "scores": {},
         }
         mock_usage = TokenUsage(50, 20, 70)
         with (
@@ -492,19 +594,23 @@ class TestReviewNode:
         ):
             mock_session.return_value = mock_session
             result = review_node({
-                "articles": [{"article_id": "kb-1"}],
+                "analyses": [{"title": "a"}],
                 "iteration": 1,
             })
         assert result["review_passed"] is False
         assert result["review_feedback"] == "摘要过短"
 
-    def test_review_score_threshold_override(self) -> None:
-        """passed=False 但 overall_score >= 7.0 时自动通过。"""
+    def test_review_threshold_boundary(self) -> None:
+        """加权总分正好 7.0 时通过。"""
         mock_result = {
-            "passed": False,
-            "overall_score": 7.5,
-            "feedback": "小问题",
-            "scores": {},
+            "scores": {
+                "summary_quality": 8,   # 2.0
+                "technical_depth": 6,   # 1.5
+                "relevance": 7,         # 1.4
+                "originality": 5,       # 0.75
+                "formatting": 9,        # 1.35
+            },                          # total = 7.0
+            "feedback": "边界分",
         }
         mock_usage = TokenUsage(50, 20, 70)
         with (
@@ -516,15 +622,111 @@ class TestReviewNode:
         ):
             mock_session.return_value = mock_session
             result = review_node({
-                "articles": [{"article_id": "kb-1"}],
+                "analyses": [{"title": "a"}],
                 "iteration": 1,
             })
         assert result["review_passed"] is True
+        assert result["review_feedback"] == ""
 
-    def test_empty_articles_auto_pass(self) -> None:
-        """空 articles 自动通过。"""
-        result = review_node({"articles": [], "iteration": 1})
+    def test_llm_failure_auto_pass(self) -> None:
+        """LLM 调用失败时自动通过，不阻塞流程。"""
+        with (
+            patch("src.graph.nodes._get_session") as mock_session,
+            patch(
+                "src.graph.nodes._call_llm_json",
+                side_effect=LlmCallError("LLM down"),
+            ),
+        ):
+            mock_session.return_value = mock_session
+            result = review_node({
+                "analyses": [{"title": "a"}],
+                "iteration": 1,
+            })
         assert result["review_passed"] is True
+        assert result["review_feedback"] == ""
+        assert result["iteration"] == 2
+
+    def test_empty_analyses_auto_pass(self) -> None:
+        """空 analyses 自动通过。"""
+        result = review_node({"analyses": [], "iteration": 1})
+        assert result["review_passed"] is True
+
+    def test_only_reviews_first_5(self) -> None:
+        """只审核前 5 条 analyses。"""
+        mock_result = {
+            "scores": {
+                "summary_quality": 9,
+                "technical_depth": 9,
+                "relevance": 9,
+                "originality": 9,
+                "formatting": 9,
+            },
+            "feedback": "",
+        }
+        mock_usage = TokenUsage(50, 20, 70)
+
+        captured_prompt = []
+
+        def _capture_prompt(
+            prompt: str,
+            session: object,
+            **kwargs: object,
+        ) -> tuple[dict[str, object], TokenUsage]:
+            captured_prompt.append(prompt)
+            return mock_result, mock_usage
+
+        analyses = [{"title": f"item-{i}"} for i in range(10)]
+
+        with (
+            patch("src.graph.nodes._get_session") as mock_session,
+            patch(
+                "src.graph.nodes._call_llm_json",
+                side_effect=_capture_prompt,
+            ),
+        ):
+            mock_session.return_value = mock_session
+            review_node({"analyses": analyses, "iteration": 1})
+
+        assert len(captured_prompt) == 1
+        # prompt 中应包含前 5 条，不应包含第 6-10 条
+        assert "item-4" in captured_prompt[0]
+        assert "item-5" not in captured_prompt[0]
+
+    def test_cost_tracker_accumulated(self) -> None:
+        """审核的 token 用量累加到 cost_tracker。"""
+        mock_result = {
+            "scores": {
+                "summary_quality": 9,
+                "technical_depth": 9,
+                "relevance": 9,
+                "originality": 9,
+                "formatting": 9,
+            },
+            "feedback": "",
+        }
+        mock_usage = TokenUsage(100, 40, 140)
+        with (
+            patch("src.graph.nodes._get_session") as mock_session,
+            patch(
+                "src.graph.nodes._call_llm_json",
+                return_value=(mock_result, mock_usage),
+            ),
+        ):
+            mock_session.return_value = mock_session
+            result = review_node({
+                "analyses": [{"title": "a"}],
+                "iteration": 1,
+                "cost_tracker": {
+                    "analyze": {
+                        "prompt_tokens": 200,
+                        "completion_tokens": 100,
+                        "total_tokens": 300,
+                    }
+                },
+            })
+        assert "review" in result["cost_tracker"]
+        assert result["cost_tracker"]["review"]["prompt_tokens"] == 100
+        assert "analyze" in result["cost_tracker"]
 
 
 # ---------------------------------------------------------------------------

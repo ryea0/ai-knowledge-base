@@ -64,6 +64,7 @@ _MAX_LLM_WORKERS = 5
 
 _ARTICLES_DIR = os.path.join("knowledge", "articles")
 _INDEX_FILE = os.path.join(_ARTICLES_DIR, "index.json")
+_FLAGGED_DIR = os.path.join("knowledge", "flagged")
 
 _ANALYZE_SYSTEM_PROMPT = (
     "你是一个专业的 AI 技术分析师。请对给定的 GitHub 仓库进行分析，"
@@ -86,26 +87,37 @@ _ORGANIZE_SYSTEM_PROMPT = (
 )
 
 _REVIEW_SYSTEM_PROMPT = (
-    "你是一个严格的知识库质量审核员。请从以下四个维度对知识条目逐一评分：\n"
-    "1. summary_quality: 摘要质量（1-10）\n"
-    "2. tag_accuracy: 标签准确性（1-10）\n"
-    "3. category_correctness: 分类合理性（1-10）\n"
-    "4. consistency: 一致性（标题/摘要/标签是否自洽）（1-10）\n"
+    "你是一个严格的知识库质量审核员。请从以下五个维度对分析结果逐一评分：\n"
+    "1. summary_quality: 摘要质量（1-10，摘要是否准确、简洁、信息完整）\n"
+    "2. technical_depth: 技术深度（1-10，技术细节是否充分、有洞察）\n"
+    "3. relevance: 相关性（1-10，与 AI/LLM/Agent 领域的相关程度）\n"
+    "4. originality: 原创性（1-10，内容是否新颖、有独特价值）\n"
+    "5. formatting: 格式规范（1-10，标签/分类/语言等格式是否合规）\n"
     "输出严格的 JSON，不要输出任何其他内容。\n"
     "JSON 结构：\n"
     "{\n"
-    '  "passed": true/false,\n'
-    '  "overall_score": 四维度平均分（浮点数）,\n'
-    '  "feedback": "改进建议（通过时为空字符串）",\n'
     '  "scores": {\n'
     '    "summary_quality": 1-10,\n'
-    '    "tag_accuracy": 1-10,\n'
-    '    "category_correctness": 1-10,\n'
-    '    "consistency": 1-10\n'
-    "  }\n"
+    '    "technical_depth": 1-10,\n'
+    '    "relevance": 1-10,\n'
+    '    "originality": 1-10,\n'
+    '    "formatting": 1-10\n'
+    "  },\n"
+    '  "feedback": "改进建议（通过时为空字符串）"\n'
     "}\n"
-    "passed 为 true 当且仅当 overall_score >= 7.0。"
+    "注意：overall_score 由调用方代码加权计算，你只需给出各维度分数和反馈。"
 )
+
+_REVIEW_DIMENSIONS: dict[str, float] = {
+    "summary_quality": 0.25,
+    "technical_depth": 0.25,
+    "relevance": 0.20,
+    "originality": 0.15,
+    "formatting": 0.15,
+}
+_REVIEW_PASS_THRESHOLD = 7.0
+_REVIEW_MAX_ITEMS = 5
+_REVIEW_TEMPERATURE = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -586,76 +598,106 @@ def organize_node(state: KBState) -> dict[str, Any]:
 
 
 def review_node(state: KBState) -> dict[str, Any]:
-    """审核节点：LLM 四维度评分，iteration >= 3 强制通过。
+    """审核节点：5 维度 LLM 评分，代码加权重算总分。
 
-    评分维度：摘要质量 / 标签准确 / 分类合理 / 一致性。
-    当 ``iteration >= _MAX_ITERATIONS`` 时跳过 LLM 审核直接强制通过，
-    避免无限循环。
+    审核对象是 ``state["analyses"]``（不是 articles，articles 在 organize 之后）。
+    只审核前 ``_REVIEW_MAX_ITEMS`` 条 analyses 以控制 token 消耗。
+    加权总分由代码计算（不信任模型算术），``>= _REVIEW_PASS_THRESHOLD`` 为通过。
+    LLM 调用失败时自动通过，不阻塞流程。
+
+    当 ``iteration >= _MAX_ITERATIONS`` 时不再调用 LLM，直接返回
+    ``review_passed=False``，由路由函数将条目导向人工标记节点。
+
+    评分维度与权重::
+
+        summary_quality   25%
+        technical_depth   25%
+        relevance         20%
+        originality       15%
+        formatting        15%
 
     Args:
-        state: 当前工作流状态，须包含 ``articles`` 和 ``iteration``。
+        state: 当前工作流状态，须包含 ``analyses`` 和 ``iteration``。
 
     Returns:
         状态更新 dict，包含 ``review_passed``、``review_feedback``
-        和 ``cost_tracker``。
+        ``iteration`` 和 ``cost_tracker``。
     """
     _set_trace_from_state(state)
     iteration = state.get("iteration", 0)
+    analyses = state.get("analyses", [])
     logger.info(
-        "启动, iteration=%d, 待审核条目数: %d",
+        "启动, iteration=%d, 待审核 analyses 数: %d",
         iteration,
-        len(state.get("articles", [])),
+        len(analyses),
     )
 
     if iteration >= _MAX_ITERATIONS:
         logger.warning(
-            "iteration=%d >= %d, 强制通过", iteration, _MAX_ITERATIONS
+            "iteration=%d >= %d, 审核仍未通过, 转入人工标记",
+            iteration,
+            _MAX_ITERATIONS,
         )
         return {
-            "review_passed": True,
-            "review_feedback": "",
+            "review_passed": False,
+            "review_feedback": "审核循环达上限, 需人工判断",
             "iteration": iteration,
         }
 
-    articles = state.get("articles", [])
-    if not articles:
-        logger.warning("无待审核条目, 自动通过")
+    if not analyses:
+        logger.warning("无待审核 analyses, 自动通过")
         return {
             "review_passed": True,
             "review_feedback": "",
             "iteration": iteration + 1,
         }
 
-    session = _get_session()
+    # 只审核前 _REVIEW_MAX_ITEMS 条，控 token 消耗
+    to_review = analyses[:_REVIEW_MAX_ITEMS]
+    logger.info("审核前 %d 条 (共 %d)", len(to_review), len(analyses))
+
     cost_tracker: dict[str, Any] = dict(state.get("cost_tracker", {}))
 
     try:
-        prompt = (
-            "请审核以下知识条目列表的质量：\n\n"
-            f"{json.dumps(articles, ensure_ascii=False, indent=2)}"
-        )
-        result, usage = _call_llm_json(
-            prompt,
-            session,
-            system_prompt=_REVIEW_SYSTEM_PROMPT,
-            temperature=0.0,
-            context="review_node",
-        )
-        _accumulate_usage(cost_tracker, "review", usage)
-    finally:
-        session.close()
+        session = _get_session()
+        try:
+            prompt = (
+                "请审核以下分析结果列表的质量：\n\n"
+                f"{json.dumps(to_review, ensure_ascii=False, indent=2)}"
+            )
+            result, usage = _call_llm_json(
+                prompt,
+                session,
+                system_prompt=_REVIEW_SYSTEM_PROMPT,
+                temperature=_REVIEW_TEMPERATURE,
+                context="review_node",
+            )
+            _accumulate_usage(cost_tracker, "review", usage)
+        finally:
+            session.close()
+    except (LlmCallError, RuntimeError, ValueError) as exc:
+        logger.error("审核 LLM 调用失败, 自动通过: %s", exc, exc_info=True)
+        return {
+            "review_passed": True,
+            "review_feedback": "",
+            "iteration": iteration + 1,
+            "cost_tracker": cost_tracker,
+        }
 
-    passed = bool(result.get("passed", False))
-    overall_score = _safe_float(result.get("overall_score", 0))
-    if not passed and overall_score >= 7.0:
-        passed = True
+    # 代码重算加权总分（不信任模型算术）
+    scores_dict = result.get("scores", {})
+    if not isinstance(scores_dict, dict):
+        scores_dict = {}
+
+    overall_score = _compute_weighted_score(scores_dict)
+    passed = overall_score >= _REVIEW_PASS_THRESHOLD
 
     feedback = str(result.get("feedback", ""))
     if passed:
         feedback = ""
 
     logger.info(
-        "审核完成: passed=%s, score=%.1f, feedback=%s",
+        "审核完成: passed=%s, overall_score=%.2f, feedback=%s",
         passed,
         overall_score,
         feedback[:100],
@@ -738,6 +780,75 @@ def save_node(state: KBState) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 节点 6: human_flag_node
+# ---------------------------------------------------------------------------
+
+
+def human_flag_node(state: KBState) -> dict[str, Any]:
+    """人工标记节点：将审核未通过的条目隔离到 ``knowledge/flagged/`` 目录。
+
+    当审核循环达到 ``_MAX_ITERATIONS`` 仍未通过时，说明问题不在"质量"
+    而在"数据"——需要人工判断。本节点将当前 analyses 连同审核反馈
+    写入独立的 ``knowledge/flagged/`` 目录，不污染主知识库
+    （``knowledge/articles/``）。
+
+    每个批次写入一个 JSON 文件，文件名包含 trace_id 和时间戳：
+    ``flagged-{trace_id}-{timestamp}.json``
+
+    文件结构::
+
+        {
+            "trace_id": "...",
+            "flagged_at": "2026-07-30T12:00:00Z",
+            "iteration": 3,
+            "review_feedback": "审核反馈内容",
+            "analyses": [...],
+        }
+
+    Args:
+        state: 当前工作流状态，须包含 ``analyses``、``iteration``
+            和 ``review_feedback``。
+
+    Returns:
+        状态更新 dict，包含 ``human_flagged: True``。
+    """
+    _set_trace_from_state(state)
+
+    analyses = state.get("analyses", [])
+    iteration = state.get("iteration", 0)
+    feedback = state.get("review_feedback", "")
+    trace_id = state.get("trace_id", "-")
+
+    logger.warning(
+        "人工标记: iteration=%d, analyses=%d, feedback=%s",
+        iteration,
+        len(analyses),
+        feedback[:100],
+    )
+
+    os.makedirs(_FLAGGED_DIR, exist_ok=True)
+
+    flag_record: dict[str, Any] = {
+        "trace_id": trace_id,
+        "flagged_at": datetime.now(UTC).isoformat(),
+        "iteration": iteration,
+        "review_feedback": feedback,
+        "analyses": analyses,
+    }
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    safe_trace = trace_id.replace("/", "-")[:16] if trace_id != "-" else "no-trace"
+    filename = f"flagged-{safe_trace}-{timestamp}.json"
+    file_path = os.path.join(_FLAGGED_DIR, filename)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(flag_record, f, ensure_ascii=False, indent=2)
+
+    logger.info("已写入人工标记文件: %s", file_path)
+    return {"human_flagged": True}
+
+
+# ---------------------------------------------------------------------------
 # 内部辅助函数
 # ---------------------------------------------------------------------------
 
@@ -755,6 +866,27 @@ def _safe_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _compute_weighted_score(scores: dict[str, Any]) -> float:
+    """根据 5 维度评分和预设权重计算加权总分。
+
+    使用 :data:`_REVIEW_DIMENSIONS` 中的权重（summary_quality 25%,
+    technical_depth 25%, relevance 20%, originality 15%, formatting 15%）。
+    每维度分数 clamp 到 [0, 10] 范围，缺失维度按 0 分处理。
+
+    Args:
+        scores: LLM 返回的各维度评分 dict，键为维度名，值为 1-10 的数字。
+
+    Returns:
+        加权总分（0.0-10.0）。
+    """
+    total = 0.0
+    for dim, weight in _REVIEW_DIMENSIONS.items():
+        raw = _safe_float(scores.get(dim, 0))
+        clamped = max(0.0, min(10.0, raw))
+        total += clamped * weight
+    return round(total, 2)
 
 
 def _to_article_dict(analysis: dict[str, Any]) -> dict[str, Any]:

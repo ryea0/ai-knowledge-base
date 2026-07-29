@@ -20,7 +20,8 @@ class KBState(TypedDict, total=False):
 
         采集 -> 分析 -> 整理 -> [审核]
                                     ├─ 通过 -> 保存
-                                    └─ 不通过 -> 整理（带 feedback），最多 3 轮
+                                    ├─ 不通过 -> 整理（带 feedback），最多 3 轮
+                                    └─ 达上限仍未通过 -> 人工标记 -> END
 
     Attributes:
         trace_id: 链路追踪 ID，工作流入口生成，各节点通过
@@ -72,7 +73,7 @@ class KBState(TypedDict, total=False):
         review_passed: 审核是否通过。
             ``True`` -> 进入保存节点；``False`` -> 回到整理节点重做。
         iteration: 当前审核循环次数，从 1 开始，最多 3 次。
-            达到上限仍未通过则强制返回最后结果。
+            达到上限仍未通过则进入人工标记节点。
         cost_tracker: Token 用量追踪字典。
             累积各节点的 LLM 调用成本，键为节点名称，值为该节点的用量摘要::
 
@@ -92,6 +93,9 @@ class KBState(TypedDict, total=False):
             每个元素包含 ``node``、``error``、``timestamp`` 三个键，
             供下游节点和调用方感知采集/分析等阶段的失败。
         saved_count: save_node 成功写入的知识条目数量。
+        human_flagged: 是否被人工标记节点拦截。
+            ``True`` 表示审核循环达上限仍未通过，条目已写入
+            ``knowledge/flagged/`` 目录等待人工判断，不应进入主知识库。
 
     """
 
@@ -129,3 +133,7 @@ class KBState(TypedDict, total=False):
     # -- 保存结果 --
     # save_node 写入的条目数
     saved_count: int
+
+    # -- 人工标记 --
+    # True = 审核循环达上限仍未通过，条目已隔离到 knowledge/flagged/
+    human_flagged: bool
