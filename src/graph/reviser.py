@@ -18,6 +18,7 @@ import json
 import logging
 from typing import Any
 
+from src.common.cost_guard import BudgetExceededError
 from src.common.trace import set_trace_id
 from src.graph.state import KBState
 from src.llm.client import LlmCallError
@@ -161,10 +162,14 @@ def revise_node(state: KBState) -> dict[str, Any]:
                 session,
                 system_prompt=_REVISE_SYSTEM_PROMPT,
                 temperature=_REVISE_TEMPERATURE,
+                node_name="revise",
             )
             _accumulate_usage(cost_tracker, "revise", usage)
         finally:
             session.close()
+    except BudgetExceededError:
+        logger.error("修订时预算超限, 跳过")
+        return {}
     except (LlmCallError, RuntimeError) as exc:
         logger.error("修订 LLM 调用失败: %s", exc, exc_info=True)
         return {}

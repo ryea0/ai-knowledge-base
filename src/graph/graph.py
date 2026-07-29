@@ -17,6 +17,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
+from src.common.cost_guard import CostGuard, cost_guard_var, set_cost_guard
 from src.common.trace import generate_trace_id
 from src.graph.nodes import (
     analyze_node,
@@ -33,6 +34,12 @@ logger = logging.getLogger(__name__)
 
 _MAX_ITERATIONS = 3
 _RECURSION_LIMIT = 20
+
+# 预算守卫默认配置
+_DEFAULT_BUDGET_YUAN = 10.0
+_DEFAULT_ALERT_THRESHOLD = 0.8
+_DEFAULT_INPUT_PRICE = 1.0
+_DEFAULT_OUTPUT_PRICE = 2.0
 
 
 def route_after_review(state: KBState) -> str:
@@ -101,29 +108,61 @@ def build_graph() -> Any:
     return compiled
 
 
-def run_workflow() -> dict[str, Any]:
+def run_workflow(
+    *,
+    budget_yuan: float = _DEFAULT_BUDGET_YUAN,
+    alert_threshold: float = _DEFAULT_ALERT_THRESHOLD,
+) -> dict[str, Any]:
     """构建并执行工作流，返回最终状态。
 
     在工作流入口生成 ``trace_id`` 并注入初始状态，
     各节点通过 ``state["trace_id"]`` 传播链路追踪 ID。
 
+    同时创建 :class:`CostGuard` 并通过 ContextVar 注入，
+    ``_call_llm`` 在每次 LLM 调用前后自动执行预算检查与成本记录。
+    工作流结束后保存成本报告到 ``knowledge/cost_report_{timestamp}.json``。
+
+    Args:
+        budget_yuan: 预算上限（元）。
+        alert_threshold: 预警阈值（0~1）。
+
     Returns:
         工作流最终状态 dict。
     """
     trace_id = generate_trace_id()
-    app = build_graph()
-    initial_state: KBState = {"trace_id": trace_id}
-    result: dict[str, Any] = dict(
-        app.invoke(
-            initial_state,
-            config={"recursion_limit": _RECURSION_LIMIT},
-        )
+
+    # 创建并注入预算守卫
+    guard = CostGuard(
+        budget_yuan=budget_yuan,
+        alert_threshold=alert_threshold,
+        input_price_per_million=_DEFAULT_INPUT_PRICE,
+        output_price_per_million=_DEFAULT_OUTPUT_PRICE,
     )
+    token = set_cost_guard(guard)
+
+    try:
+        app = build_graph()
+        initial_state: KBState = {"trace_id": trace_id}
+        result: dict[str, Any] = dict(
+            app.invoke(
+                initial_state,
+                config={"recursion_limit": _RECURSION_LIMIT},
+            )
+        )
+    finally:
+        # 工作流结束后保存成本报告
+        try:
+            guard.save_report()
+        except Exception:
+            logger.warning("保存成本报告失败", exc_info=True)
+        # 恢复 ContextVar 原值
+        cost_guard_var.reset(token)
+
     return result
 
 
 if __name__ == "__main__":
-    from src.common.trace import TraceIdFilter, set_trace_id, generate_trace_id
+    from src.common.trace import TraceIdFilter, generate_trace_id, set_trace_id
 
     # 设置 trace_id，确保 __main__ 块的日志也能输出 trace_id
     _main_trace_id = generate_trace_id()
@@ -168,6 +207,26 @@ if __name__ == "__main__":
                 node,
                 usage.get("prompt_tokens", 0),
                 usage.get("completion_tokens", 0),
+            )
+    from src.common.cost_guard import get_cost_guard
+
+    guard = get_cost_guard()
+    if guard is not None and guard.records:
+        report = guard.get_report()
+        summary = report["summary"]
+        logger.info(
+            "成本报告: 总费用 %.6f 元 / 预算 %.2f 元 (%.1f%%), 调用 %d 次",
+            summary["total_cost_yuan"],
+            summary["budget_yuan"],
+            summary["usage_ratio"] * 100,
+            summary["call_count"],
+        )
+        for node, stats in report["by_node"].items():
+            logger.info(
+                "  %s: %d 次调用, %.6f 元",
+                node,
+                stats["call_count"],
+                stats["cost_yuan"],
             )
     if final_state.get("errors"):
         logger.warning("工作流执行中有 %d 个错误", len(final_state["errors"]))

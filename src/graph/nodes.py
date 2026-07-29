@@ -30,6 +30,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from src.common.cost_guard import BudgetExceededError, get_cost_guard
 from src.common.trace import set_trace_id
 from src.config.database import get_session_factory, session_scope
 from src.graph.state import KBState
@@ -238,25 +239,37 @@ def _call_llm(
     *,
     system_prompt: str = "",
     temperature: float = 0.7,
+    node_name: str = "",
 ) -> tuple[str, TokenUsage]:
     """调用 LLM 并返回 (文本, token 用量)。
 
     内部通过 :func:`select_first_available` 获取供应商-模型对，
     调用 :func:`chat_completion_with_retry` 发送单轮对话。
 
+    若 ContextVar 中已注入 :class:`CostGuard`，则在调用前执行
+    :meth:`CostGuard.check`（超限抛 :class:`BudgetExceededError`），
+    调用后执行 :meth:`CostGuard.record` 记录 token 用量与费用。
+
     Args:
         prompt: 用户提问文本。
         session: SQLAlchemy Session。
         system_prompt: 可选的 system 消息。
         temperature: 采样温度。
+        node_name: 发起调用的节点名称，用于成本追踪。
 
     Returns:
         (回复文本, TokenUsage) 元组。
 
     Raises:
+        BudgetExceededError: 预算超限（由 CostGuard.check 抛出）。
         LlmCallError: LLM 调用失败。
         RuntimeError: 无可用供应商-模型组合。
     """
+    # 预算前置检查
+    guard = get_cost_guard()
+    if guard is not None:
+        guard.check()
+
     pair = select_first_available(session)
     if pair is None:
         raise RuntimeError("无可用 LLM 供应商-模型组合")
@@ -276,6 +289,18 @@ def _call_llm(
     )
 
     assert isinstance(response, LLMResponse)
+
+    # 成本后置记录
+    if guard is not None:
+        guard.record(
+            node_name or "unknown",
+            {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+            },
+            model=model.model_code,
+        )
+
     return response.content, response.usage
 
 
@@ -286,6 +311,7 @@ def _call_llm_json(
     system_prompt: str = "",
     temperature: float = 0.7,
     context: str = "LLM",
+    node_name: str = "",
 ) -> tuple[dict[str, Any], TokenUsage]:
     """调用 LLM 并解析 JSON 输出。
 
@@ -295,6 +321,7 @@ def _call_llm_json(
         system_prompt: 可选的 system 消息。
         temperature: 采样温度。
         context: JSON 解析失败时的上下文名称。
+        node_name: 发起调用的节点名称，透传给 :func:`_call_llm` 用于成本追踪。
 
     Returns:
         (解析后的 dict, TokenUsage) 元组。
@@ -303,12 +330,14 @@ def _call_llm_json(
         ValueError: LLM 输出无法解析为 JSON。
         LlmCallError: LLM 调用失败。
         RuntimeError: 无可用供应商-模型组合。
+        BudgetExceededError: 预算超限。
     """
     text, usage = _call_llm(
         prompt,
         session,
         system_prompt=system_prompt,
         temperature=temperature,
+        node_name=node_name,
     )
     return _parse_json_output(text, context), usage
 
@@ -477,6 +506,7 @@ def analyze_node(state: KBState) -> dict[str, Any]:
                 system_prompt=_ANALYZE_SYSTEM_PROMPT,
                 temperature=0.3,
                 context="analyze_node",
+                node_name="analyze",
             )
             result["source_url"] = item.get("url", "")
             result["source_platform"] = item.get("source_platform", "")
@@ -495,6 +525,16 @@ def analyze_node(state: KBState) -> dict[str, Any]:
                         analysis.get("title", "?"),
                         analysis.get("score", "?"),
                     )
+                except BudgetExceededError:
+                    logger.error("预算超限, 中止剩余分析")
+                    errors.append(
+                        {
+                            "node": "analyze",
+                            "error": "预算超限",
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+                    )
+                    break
                 except LlmCallError as exc:
                     logger.error("LLM 调用失败: %s", exc, exc_info=True)
                     errors.append(
@@ -577,6 +617,7 @@ def organize_node(state: KBState) -> dict[str, Any]:
                     system_prompt=_ORGANIZE_SYSTEM_PROMPT,
                     temperature=0.3,
                     context="organize_node",
+                    node_name="organize",
                 )
                 for key in ("source_url", "source_platform", "source_score"):
                     if key in item:
@@ -671,10 +712,19 @@ def review_node(state: KBState) -> dict[str, Any]:
                 system_prompt=_REVIEW_SYSTEM_PROMPT,
                 temperature=_REVIEW_TEMPERATURE,
                 context="review_node",
+                node_name="review",
             )
             _accumulate_usage(cost_tracker, "review", usage)
         finally:
             session.close()
+    except BudgetExceededError:
+        logger.error("审核时预算超限, 自动通过")
+        return {
+            "review_passed": True,
+            "review_feedback": "",
+            "iteration": iteration + 1,
+            "cost_tracker": cost_tracker,
+        }
     except (LlmCallError, RuntimeError, ValueError) as exc:
         logger.error("审核 LLM 调用失败, 自动通过: %s", exc, exc_info=True)
         return {
