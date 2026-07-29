@@ -6,7 +6,7 @@
 本模块定义两个状态类型：
 
 - :class:`WorkflowState` -- 旧版线性流程状态（采集 -> 分析 -> 整理 -> 分发），
-  保留向后兼容，已用于 ``src/graph/nodes.py`` 和 ``src/graph/workflow.py``。
+  保留向后兼容，已用于 ``src/graph/nodes.py`` 和 ``src/graph/graph.py``。
 - :class:`KBState` -- 新版带审核循环的工作流状态，支持 Supervisor 质量审核、
   带反馈重做和 Token 成本追踪。后续工作流升级后将切换到 ``KBState``。
 """
@@ -124,6 +124,8 @@ class KBState(TypedDict, total=False):
                     },
                 }
 
+        saved_count: save_node 成功写入的知识条目数量。
+
     """
 
     # -- 采集产出 --
@@ -149,3 +151,7 @@ class KBState(TypedDict, total=False):
     # -- 成本追踪 --
     # 键=节点名，值={prompt_tokens, completion_tokens, total_cost}
     cost_tracker: dict[str, Any]
+
+    # -- 保存结果 --
+    # save_node 写入的条目数
+    saved_count: int
