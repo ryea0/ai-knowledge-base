@@ -13,6 +13,7 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -338,7 +339,9 @@ class RSSCollector:
 
     @staticmethod
     def _clean_text(text: str) -> str:
-        """清理 XML CDATA 和 HTML 实体。
+        """清理 XML CDATA 包裹和 HTML 实体。
+
+        处理顺序：去 CDATA -> 去 HTML 标签 -> 反转义 HTML 实体 -> 去首尾空白。
 
         Args:
             text: 原始文本。
@@ -350,6 +353,8 @@ class RSSCollector:
             text = text[9:]
         if text.endswith("]]>"):
             text = text[:-3]
+        text = re.sub(r"<[^>]+>", "", text)
+        text = unescape(text)
         return text.strip()
 
     def _rate_limit_wait(self) -> None:
