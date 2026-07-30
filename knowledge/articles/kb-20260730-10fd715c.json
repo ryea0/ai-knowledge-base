@@ -1,0 +1,23 @@
+{
+  "article_id": "kb-20260730-10fd715c",
+  "title": "Writing the PHP Virtual Machine in Rust (with a lot of help from AI)",
+  "source_url": "https://jolicode.com/blog/writing-the-php-virtual-machine-in-rust-with-a-lot-of-help-from-ai",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "<p><a href=\"https://lobste.rs/s/hbtqfe/writing_php_virtual_machine_rust_with_lot\">Comments</a></p>",
+  "content_path": "knowledge/raw/kb-20260730-10fd715c.md",
+  "tags": [
+    "ai",
+    "llm",
+    "news"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:04:20Z",
+  "analyzed_at": "2026-07-30T18:04:31Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [],
+  "score": 5
+}
