@@ -6,7 +6,8 @@
 - organize_node: 低分过滤 / URL 去重 / 反馈修正
 - review_node: LLM 审核评分 / iteration 强制通过
 - save_node: DB 写入 + 文件写入 / index.json 更新
-- 工具函数: _parse_json_output / _accumulate_usage / _safe_float / _to_article_dict
+- 工具函数: _parse_json_output / _accumulate_usage / _safe_float
+  / _safe_int_score / _to_article_dict
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from src.graph.nodes import (
     _compute_weighted_score,
     _parse_json_output,
     _safe_float,
+    _safe_int_score,
     _to_article_dict,
     analyze_node,
     collect_node,
@@ -121,6 +123,31 @@ class TestSafeFloat:
         assert _safe_float(None) == 0.0
 
 
+class TestSafeIntScore:
+    """_safe_int_score 测试。"""
+
+    def test_valid_int(self) -> None:
+        assert _safe_int_score(8) == 8
+
+    def test_valid_float(self) -> None:
+        assert _safe_int_score(8.7) == 8
+
+    def test_valid_string(self) -> None:
+        assert _safe_int_score("7") == 7
+
+    def test_clamp_above_10(self) -> None:
+        assert _safe_int_score(15) == 10
+
+    def test_clamp_below_1(self) -> None:
+        assert _safe_int_score(0) == 1
+
+    def test_invalid_string(self) -> None:
+        assert _safe_int_score("abc") == 5
+
+    def test_none(self) -> None:
+        assert _safe_int_score(None) == 5
+
+
 class TestToArticleDict:
     """_to_article_dict 测试。"""
 
@@ -130,7 +157,7 @@ class TestToArticleDict:
             "title": "测试项目",
             "summary": "测试摘要",
             "tags": ["llm", "agent"],
-            "score": 0.85,
+            "score": 8,
             "category": "tool",
             "language": "en",
             "source_url": "https://github.com/test/repo",
@@ -141,7 +168,7 @@ class TestToArticleDict:
         assert article["title"] == "测试项目"
         assert article["summary"] == "测试摘要"
         assert article["tags"] == ["llm", "agent"]
-        assert article["score"] == 0.85
+        assert article["score"] == 8
         assert article["status"] == "pending"
         assert article["category"] == "tool"
         assert article["language"] == "en"
@@ -154,7 +181,7 @@ class TestToArticleDict:
         assert article["title"] == ""
         assert article["summary"] == ""
         assert article["tags"] == []
-        assert article["score"] == 0.0
+        assert article["score"] == 5
         assert article["category"] == "news"
         assert article["language"] == "zh"
 
@@ -315,7 +342,7 @@ class TestAnalyzeNode:
             "title": "测试仓库",
             "summary": "测试摘要",
             "tags": ["llm"],
-            "score": 0.8,
+            "score": 8,
             "category": "tool",
             "language": "en",
         }
@@ -369,7 +396,7 @@ class TestAnalyzeNode:
             ) as mock_select,
             patch(
                 "src.graph.nodes._call_llm_json",
-                return_value=({"title": "t", "score": 0.9}, mock_usage),
+                return_value=({"title": "t", "score": 9}, mock_usage),
             ),
         ):
             result = analyze_node({
@@ -406,8 +433,8 @@ class TestOrganizeNode:
     def test_filter_low_score(self) -> None:
         """低分条目被过滤。"""
         analyses = [
-            {"title": "good", "score": 0.8, "source_url": "url1"},
-            {"title": "bad", "score": 0.3, "source_url": "url2"},
+            {"title": "good", "score": 8, "source_url": "url1"},
+            {"title": "bad", "score": 3, "source_url": "url2"},
         ]
         result = organize_node({"analyses": analyses})
         assert len(result["articles"]) == 1
@@ -416,8 +443,8 @@ class TestOrganizeNode:
     def test_dedup_by_url(self) -> None:
         """相同 URL 的条目去重。"""
         analyses = [
-            {"title": "a", "score": 0.8, "source_url": "same_url"},
-            {"title": "b", "score": 0.9, "source_url": "same_url"},
+            {"title": "a", "score": 8, "source_url": "same_url"},
+            {"title": "b", "score": 9, "source_url": "same_url"},
         ]
         result = organize_node({"analyses": analyses})
         assert len(result["articles"]) == 1
@@ -425,7 +452,7 @@ class TestOrganizeNode:
 
     def test_no_feedback_no_llm(self) -> None:
         """无反馈时不调用 LLM。"""
-        analyses = [{"title": "a", "score": 0.8, "source_url": "url1"}]
+        analyses = [{"title": "a", "score": 8, "source_url": "url1"}]
         with patch("src.graph.nodes._get_session") as mock_session:
             result = organize_node({"analyses": analyses, "iteration": 0})
             mock_session.assert_not_called()
@@ -436,7 +463,7 @@ class TestOrganizeNode:
         analyses = [
             {
                 "title": "a",
-                "score": 0.8,
+                "score": 8,
                 "source_url": "url1",
                 "summary": "old summary",
                 "tags": ["tag1"],
@@ -446,7 +473,7 @@ class TestOrganizeNode:
             "title": "a (修正)",
             "summary": "improved summary",
             "tags": ["tag1", "tag2"],
-            "score": 0.9,
+            "score": 9,
         }
         mock_usage = TokenUsage(50, 30, 80)
 

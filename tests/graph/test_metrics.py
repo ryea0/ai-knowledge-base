@@ -480,7 +480,7 @@ class TestGraphWithMetrics:
             ):
                 mock_collect.return_value = {"sources": [{"title": "t"}]}
                 mock_analyze.return_value = {
-                    "analyses": [{"title": "t", "score": 0.8}]
+                    "analyses": [{"title": "t", "score": 8}]
                 }
                 mock_review.return_value = {
                     "review_passed": True,
@@ -557,7 +557,7 @@ class TestGraphWithMetrics:
                 mock_collect.return_value = {"sources": [{"title": "t"}]}
                 mock_analyze.return_value = {"analyses": [{"title": "t"}]}
                 mock_revise.return_value = {
-                    "analyses": [{"title": "t", "score": 0.9}]
+                    "analyses": [{"title": "t", "score": 9}]
                 }
                 mock_organize.return_value = {
                     "articles": [{"article_id": "kb-1"}]

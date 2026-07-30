@@ -23,8 +23,8 @@ class TestHumanFlagNode:
     def test_writes_flagged_file(self) -> None:
         """正常写入 flagged JSON 文件。"""
         analyses = [
-            {"title": "问题条目A", "summary": "质量差", "score": 0.3},
-            {"title": "问题条目B", "summary": "不相关", "score": 0.2},
+            {"title": "问题条目A", "summary": "质量差", "score": 3},
+            {"title": "问题条目B", "summary": "不相关", "score": 2},
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -176,7 +176,7 @@ class TestHumanFlagNode:
             flagged_dir = os.path.join(tmpdir, "flagged")
             with patch("src.graph.nodes._FLAGGED_DIR", flagged_dir):
                 human_flag_node({
-                    "analyses": [{"title": "a", "score": 0.4}],
+                    "analyses": [{"title": "a", "score": 4}],
                     "iteration": 3,
                     "review_feedback": "需要人工判断",
                     "trace_id": "struct-test",

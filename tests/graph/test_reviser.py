@@ -106,12 +106,12 @@ class TestReviseNode:
     def test_revise_success(self) -> None:
         """成功改写返回 improved analyses。"""
         original_analyses = [
-            {"title": "项目A", "summary": "旧摘要", "score": 0.5},
-            {"title": "项目B", "summary": "旧摘要B", "score": 0.6},
+            {"title": "项目A", "summary": "旧摘要", "score": 5},
+            {"title": "项目B", "summary": "旧摘要B", "score": 6},
         ]
         improved_json = (
-            '[{"title": "项目A", "summary": "改进摘要", "score": 0.8}, '
-            '{"title": "项目B", "summary": "改进摘要B", "score": 0.9}]'
+            '[{"title": "项目A", "summary": "改进摘要", "score": 8}, '
+            '{"title": "项目B", "summary": "改进摘要B", "score": 9}]'
         )
         mock_usage = TokenUsage(200, 100, 300)
 

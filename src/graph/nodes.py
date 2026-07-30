@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # 常量
 # ---------------------------------------------------------------------------
 
-_MIN_SCORE = 0.6
+_MIN_SCORE = 6
 _MAX_ITERATIONS = 3
 _MAX_LLM_WORKERS = 5
 
@@ -63,7 +63,7 @@ _ANALYZE_SYSTEM_PROMPT = (
     '  "title": "中文标题（保留专有名词英文）",\n'
     '  "summary": "2-4 句话中文摘要（150 字以内）",\n'
     '  "tags": ["小写英文标签", "3-8 个"],\n'
-    '  "score": 0.0-1.0 的浮点数（质量评分）,\n'
+    '  "score": 1-10 的整数（质量评分）,\n'
     '  "category": "model_release|paper|tool|tutorial|news",\n'
     '  "language": "zh|en"\n'
     "}"
@@ -869,6 +869,25 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def _safe_int_score(value: Any) -> int:
+    """安全转换为 1-10 的整数评分，失败返回 5。
+
+    LLM 可能返回浮点数（如 ``8.0``）或字符串（如 ``"8"``），
+    本函数统一转为 int 并 clamp 到 [1, 10] 范围。
+
+    Args:
+        value: 待转换的评分值。
+
+    Returns:
+        1-10 的整数评分，转换失败时返回 5（默认中位分）。
+    """
+    try:
+        score = int(float(value))
+    except (TypeError, ValueError):
+        return 5
+    return max(1, min(10, score))
+
+
 def _compute_weighted_score(scores: dict[str, Any]) -> float:
     """根据 5 维度评分和预设权重计算加权总分。
 
@@ -916,7 +935,7 @@ def _to_article_dict(analysis: dict[str, Any]) -> dict[str, Any]:
         "analyzed_at": now,
         "published_at": None,
         "published_channels": None,
-        "score": _safe_float(analysis.get("score", 0)),
+        "score": _safe_int_score(analysis.get("score", 5)),
     }
 
 
@@ -970,7 +989,7 @@ def _to_article_orm(article: dict[str, Any]) -> Article:
         language=article.get("language", "zh"),
         collected_at=collected_at,
         analyzed_at=analyzed_at,
-        score=int(_safe_float(article.get("score", 0)) * 10)
+        score=_safe_int_score(article.get("score"))
         if article.get("score") is not None
         else None,
         highlights=article.get("highlights"),

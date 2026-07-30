@@ -62,7 +62,7 @@ class TestBuildGraph:
             patch("src.graph.graph.human_flag_node") as mock_flag,
         ):
             mock_collect.return_value = {"sources": [{"title": "t"}]}
-            mock_analyze.return_value = {"analyses": [{"title": "t", "score": 0.8}]}
+            mock_analyze.return_value = {"analyses": [{"title": "t", "score": 8}]}
             mock_review.return_value = {
                 "review_passed": True,
                 "review_feedback": "",
@@ -100,7 +100,7 @@ class TestBuildGraph:
 
         def mock_revise_fn(state: KBState) -> dict:
             call_count["revise"] += 1
-            return {"analyses": [{"title": "t", "score": 0.9}]}
+            return {"analyses": [{"title": "t", "score": 9}]}
 
         with (
             patch("src.graph.graph.collect_node") as mock_collect,

@@ -45,7 +45,7 @@ _ANALYZE_PROMPT = (
     '  "title": "中文标题（保留专有名词英文）",\n'
     '  "summary": "2-4 句话中文摘要（150 字以内）",\n'
     '  "tags": ["小写英文标签", "3-8 个"],\n'
-    '  "score": 0.0-1.0 的浮点数（质量评分）,\n'
+    '  "score": 1-10 的整数（质量评分）,\n'
     '  "category": "model_release|paper|tool|tutorial|news",\n'
     '  "language": "zh|en"\n'
     "}"
@@ -71,7 +71,7 @@ def _check_positive(result: dict[str, Any]) -> None:
 def _check_negative(result: dict[str, Any]) -> None:
     """负面案例断言：低分或低相关。"""
     score = result.get("score", 0)
-    assert score <= 0.6, f"无关内容应低分（<=0.6），实际 {score}"
+    assert score <= 6, f"无关内容应低分（<=6），实际 {score}"
 
 
 def _check_boundary(result: dict[str, Any]) -> None:
@@ -94,7 +94,7 @@ EVAL_CASES: list[dict[str, Any]] = [
         ),
         "expected": {
             "check": _check_positive,
-            "score_range": (0.5, 1.0),
+            "score_range": (5, 10),
             "category_in": ["model_release", "tool", "tutorial", "news"],
         },
     },
@@ -106,7 +106,7 @@ EVAL_CASES: list[dict[str, Any]] = [
         ),
         "expected": {
             "check": _check_negative,
-            "score_range": (0.0, 0.6),
+            "score_range": (1, 6),
             "category_in": ["news"],
         },
     },
@@ -115,7 +115,7 @@ EVAL_CASES: list[dict[str, Any]] = [
         "input": "AI",
         "expected": {
             "check": _check_boundary,
-            "score_range": (0.0, 1.0),
+            "score_range": (1, 10),
             "category_in": ["model_release", "paper", "tool", "tutorial", "news"],
         },
     },
@@ -128,7 +128,7 @@ EVAL_CASES: list[dict[str, Any]] = [
         ),
         "expected": {
             "check": _check_positive,
-            "score_range": (0.6, 1.0),
+            "score_range": (6, 10),
             "category_in": ["paper", "tutorial", "tool"],
         },
     },
@@ -394,7 +394,7 @@ class TestRealArchivedArticle:
 
         # 真实文章 score 应较高
         score = float(result["score"])
-        assert score >= 0.5, f"真实技术文章 score={score} 过低"
+        assert score >= 5, f"真实技术文章 score={score} 过低"
 
         # LLM-as-Judge 打分
         judge_raw = _call_llm(
