@@ -8,6 +8,7 @@
     - ``nodes``: 图节点（采集/分析/整理/审核/保存/人工标记）
     - ``reviser``: 修订节点（根据审核反馈批量改写 analyses）
     - ``graph``: LangGraph 图构建与编译
+    - ``metrics``: 工作流指标采集器（观察者模式装饰器注入）
 """
 
 from src.graph.graph import build_graph

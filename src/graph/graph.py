@@ -19,6 +19,12 @@ from langgraph.graph import END, StateGraph
 
 from src.common.cost_guard import CostGuard, cost_guard_var, set_cost_guard
 from src.common.trace import generate_trace_id
+from src.graph.metrics import (
+    MetricsCollector,
+    metrics_collector_var,
+    set_metrics_collector,
+    with_metrics,
+)
 from src.graph.nodes import (
     analyze_node,
     collect_node,
@@ -75,13 +81,13 @@ def build_graph() -> Any:
         编译后的 LangGraph 可执行图，调用 ``.invoke(state)`` 执行。
     """
     graph = StateGraph(KBState)
-    graph.add_node("collect", collect_node)
-    graph.add_node("analyze", analyze_node)
-    graph.add_node("review", review_node)
-    graph.add_node("organize", organize_node)
-    graph.add_node("revise", revise_node)
-    graph.add_node("save", save_node)
-    graph.add_node("human_flag", human_flag_node)
+    graph.add_node("collect", with_metrics(collect_node, "collect"))
+    graph.add_node("analyze", with_metrics(analyze_node, "analyze"))
+    graph.add_node("review", with_metrics(review_node, "review"))
+    graph.add_node("organize", with_metrics(organize_node, "organize"))
+    graph.add_node("revise", with_metrics(revise_node, "revise"))
+    graph.add_node("save", with_metrics(save_node, "save"))
+    graph.add_node("human_flag", with_metrics(human_flag_node, "human_flag"))
 
     graph.set_entry_point("collect")
     graph.add_edge("collect", "analyze")
@@ -118,10 +124,13 @@ def run_workflow(
     在工作流入口生成 ``trace_id`` 并注入初始状态，
     各节点通过 ``state["trace_id"]`` 传播链路追踪 ID。
 
-    同时创建 :class:`CostGuard` 并通过 ContextVar 注入，
-    ``chat_completion`` 在每次 LLM 调用后自动执行成本记录与预算检查。
-    工作流结束后保存成本报告到 ``knowledge/cost_report_{timestamp}.json``，
-    并将 guard 实例放入返回状态的 ``"cost_guard"`` 键供调用方查看。
+    同时创建 :class:`CostGuard` 和 :class:`MetricsCollector`，
+    分别通过 ContextVar 注入。``chat_completion`` 在每次 LLM 调用后
+    自动执行成本记录与预算检查；``with_metrics`` 装饰器在节点执行
+    前后自动采集耗时与产出。工作流结束后保存成本报告到
+    ``knowledge/cost_report_{timestamp}.json``，并将指标持久化到
+    ``kb_pipeline_run`` + ``kb_node_metric`` 表。
+    guard 实例放入返回状态的 ``"cost_guard"`` 键供调用方查看。
 
     Args:
         budget_yuan: 预算上限（元）。
@@ -141,10 +150,16 @@ def run_workflow(
     )
     token = set_cost_guard(guard)
 
+    # 创建并注入指标采集器
+    collector = MetricsCollector(trace_id=trace_id)
+    collector.on_workflow_start()
+    metrics_token = set_metrics_collector(collector)
+
+    result: dict[str, Any] = {}
     try:
         app = build_graph()
         initial_state: KBState = {"trace_id": trace_id}
-        result: dict[str, Any] = dict(
+        result = dict(
             app.invoke(
                 initial_state,
                 config={"recursion_limit": _RECURSION_LIMIT},
@@ -154,6 +169,12 @@ def run_workflow(
         # （ContextVar 在 finally 中会被 reset，外部无法再通过 get_cost_guard 获取）
         result["cost_guard"] = guard
     finally:
+        # 记录工作流结束并持久化指标（采集失败不影响 pipeline, C6）
+        try:
+            collector.on_workflow_end(result)
+            collector.persist(result)
+        except Exception:
+            logger.warning("指标持久化失败, 已忽略 (C6)", exc_info=True)
         # 工作流结束后保存成本报告
         try:
             guard.save_report()
@@ -161,6 +182,7 @@ def run_workflow(
             logger.warning("保存成本报告失败", exc_info=True)
         # 恢复 ContextVar 原值
         cost_guard_var.reset(token)
+        metrics_collector_var.reset(metrics_token)
 
     return result
 
