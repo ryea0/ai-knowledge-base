@@ -1,0 +1,23 @@
+{
+  "article_id": "kb-20260730-c352494d",
+  "title": "Claude: Elevated errors across all models – Resolved",
+  "source_url": "https://status.claude.com/incidents/q2kg8n613kr3",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "Article URL: https://status.claude.com/incidents/q2kg8n613kr3\nComments URL: https://news.ycombinator.com/item?id=49102150\nPoints: 266\n# Comments: 246",
+  "content_path": "knowledge/raw/kb-20260730-c352494d.md",
+  "tags": [
+    "ai",
+    "llm",
+    "news"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:30:32Z",
+  "analyzed_at": "2026-07-30T18:30:49Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [],
+  "score": 5
+}
