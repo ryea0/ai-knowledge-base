@@ -1,0 +1,23 @@
+{
+  "article_id": "kb-20260730-6c7d353a",
+  "title": "How GPT-5.6 fuses frontier intelligence with frontier efficiency",
+  "source_url": "https://openai.com/index/gpt-5-6-frontier-intelligence-efficiency",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "GPT-5.6 improves AI efficiency across models, inference, and agentic workflows, helping deliver more useful intelligence per dollar.",
+  "content_path": "knowledge/raw/kb-20260730-6c7d353a.md",
+  "tags": [
+    "agent",
+    "ai",
+    "llm"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:22:50Z",
+  "analyzed_at": "2026-07-30T18:23:01Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [],
+  "score": 5
+}

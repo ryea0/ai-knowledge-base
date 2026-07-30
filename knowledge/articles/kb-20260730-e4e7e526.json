@@ -1,0 +1,23 @@
+{
+  "article_id": "kb-20260730-e4e7e526",
+  "title": "Scientific computing in the age of agentic AI",
+  "source_url": "https://openai.com/index/scientific-computing-agentic-ai",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "A new field report shows how scientists use AI coding agents to modernize scientific computing, accelerating software development and discovery in gen",
+  "content_path": "knowledge/raw/kb-20260730-e4e7e526.md",
+  "tags": [
+    "agent",
+    "ai",
+    "llm"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:22:50Z",
+  "analyzed_at": "2026-07-30T18:23:01Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [],
+  "score": 5
+}

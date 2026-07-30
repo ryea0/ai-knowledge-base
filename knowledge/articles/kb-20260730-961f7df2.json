@@ -1,0 +1,23 @@
+{
+  "article_id": "kb-20260730-961f7df2",
+  "title": "A tour of MLIR: The Dialect Stack Everyone Depends On",
+  "source_url": "https://hiraditya.github.io/posts/mlir-dialect-stack-for-ml/",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "<p><a href=\"https://lobste.rs/s/o9vjlt/tour_mlir_dialect_stack_everyone_depends\">Comments</a></p>",
+  "content_path": "knowledge/raw/kb-20260730-961f7df2.md",
+  "tags": [
+    "ai",
+    "llm",
+    "news"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:22:49Z",
+  "analyzed_at": "2026-07-30T18:23:01Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [],
+  "score": 5
+}
