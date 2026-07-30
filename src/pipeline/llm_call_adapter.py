@@ -30,6 +30,7 @@ def chat_for_analysis(
     system_prompt: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
+    node_name: str = "unknown",
 ) -> str:
     """调用 LLM 进行分析（无内置重试，由外层 ``with_retry`` 装饰器控制重试）。
 
@@ -52,6 +53,7 @@ def chat_for_analysis(
         system_prompt: 可选的 system 消息，用于设定角色或上下文。
         temperature: 采样温度，默认 0.7。
         max_tokens: 最大输出 tokens，None 则使用模型默认值。
+        node_name: 发起调用的节点名称，透传给 :func:`chat_completion` 用于成本追踪。
 
     Returns:
         LLM 生成的回复文本。
@@ -81,6 +83,7 @@ def chat_for_analysis(
             temperature=temperature,
             max_tokens=max_tokens,
             session=session,
+            node_name=node_name,
         )
     except LlmCallError as exc:
         if exc.error_type in RETRYABLE_LLM_ERROR_TYPES:

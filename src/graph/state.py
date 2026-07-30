@@ -137,3 +137,7 @@ class KBState(TypedDict, total=False):
     # -- 人工标记 --
     # True = 审核循环达上限仍未通过，条目已隔离到 knowledge/flagged/
     human_flagged: bool
+
+    # -- 成本守卫实例（仅 run_workflow 返回值中存在，非图执行状态）--
+    # CostGuard 实例，供调用方查看成本报告
+    cost_guard: Any

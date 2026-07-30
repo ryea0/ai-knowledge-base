@@ -21,7 +21,7 @@
 
 from src.llm.auth_adapter import AuthContext, build_auth_context, build_httpx_headers
 from src.llm.budget import BudgetConfig, BudgetExceededError, BudgetGuard
-from src.llm.client import LLMResponse, chat_completion, quick_chat
+from src.llm.client import LLMResponse, chat_completion, get_cost_guard, quick_chat
 from src.llm.connectivity import ConnectivityResult, test_connectivity
 from src.llm.cost import CostEstimate, TokenUsage, estimate_cost, extract_usage
 from src.llm.log_call import write_call_log
@@ -106,6 +106,7 @@ __all__ = [
     "estimate_cost",
     "extract_usage",
     "extract_content",
+    "get_cost_guard",
     "get_metadata_extractor",
     "get_provider",
     "get_provider_detail",

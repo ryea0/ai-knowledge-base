@@ -28,9 +28,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.collectors import default_registry
-from src.common.cost_guard import BudgetExceededError, get_cost_guard
+from src.common.cost_guard import BudgetExceededError
 from src.common.trace import set_trace_id
 from src.config.database import get_session_factory, session_scope
+from src.graph.security import filter_output, sanitize_input
 from src.graph.state import KBState
 from src.llm.client import LlmCallError, chat_completion_with_retry
 from src.llm.cost import TokenUsage
@@ -209,30 +210,26 @@ def _call_llm(
     内部通过 :func:`select_first_available` 获取供应商-模型对，
     调用 :func:`chat_completion_with_retry` 发送单轮对话。
 
-    若 ContextVar 中已注入 :class:`CostGuard`，则在调用前执行
-    :meth:`CostGuard.check`（超限抛 :class:`BudgetExceededError`），
-    调用后执行 :meth:`CostGuard.record` 记录 token 用量与费用。
+    成本追踪由 :func:`chat_completion` 内部统一处理（record + check），
+    本函数不再重复调用，避免双重计数。超限时 ``chat_completion`` 抛出
+    :class:`BudgetExceededError`，由调用方捕获处理。
 
     Args:
         prompt: 用户提问文本。
         session: SQLAlchemy Session。
         system_prompt: 可选的 system 消息。
         temperature: 采样温度。
-        node_name: 发起调用的节点名称，用于成本追踪。
+        node_name: 发起调用的节点名称，透传给 ``chat_completion_with_retry``
+            用于成本追踪。
 
     Returns:
         (回复文本, TokenUsage) 元组。
 
     Raises:
-        BudgetExceededError: 预算超限（由 CostGuard.check 抛出）。
+        BudgetExceededError: 预算超限（由 ``chat_completion`` 内部 check 抛出）。
         LlmCallError: LLM 调用失败。
         RuntimeError: 无可用供应商-模型组合。
     """
-    # 预算前置检查
-    guard = get_cost_guard()
-    if guard is not None:
-        guard.check()
-
     pair = select_first_available(session)
     if pair is None:
         raise RuntimeError("无可用 LLM 供应商-模型组合")
@@ -249,20 +246,10 @@ def _call_llm(
         messages,
         temperature=temperature,
         session=session,
+        node_name=node_name,
     )
 
     assert isinstance(response, LLMResponse)
-
-    # 成本后置记录
-    if guard is not None:
-        guard.record(
-            node_name or "unknown",
-            {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            },
-            model=model.model_code,
-        )
 
     return response.content, response.usage
 
@@ -337,6 +324,27 @@ def collect_node(state: KBState) -> dict[str, Any]:
     for name, collector in collectors:
         try:
             items = collector.collect()
+            for item in items:
+                title = item.get("title", "")
+                if title:
+                    cleaned, warnings = sanitize_input(title)
+                    if warnings:
+                        logger.warning(
+                            "采集条目标题存在安全风险: collector=%s warnings=%s",
+                            name,
+                            warnings,
+                        )
+                    item["title"] = cleaned
+                summary = item.get("summary", "")
+                if summary:
+                    cleaned, warnings = sanitize_input(summary)
+                    if warnings:
+                        logger.warning(
+                            "采集条目摘要存在安全风险: collector=%s warnings=%s",
+                            name,
+                            warnings,
+                        )
+                    item["summary"] = cleaned
             sources.extend(items)
             logger.info("采集器 %s: %d 条", name, len(items))
         except Exception as exc:
@@ -536,12 +544,12 @@ def organize_node(state: KBState) -> dict[str, Any]:
                     if key in item:
                         result[key] = item[key]
                 _accumulate_usage(cost_tracker, "organize", usage)
-                articles.append(_to_article_dict(result))
+                articles.append(_filter_article_pii(_to_article_dict(result)))
         finally:
             session.close()
     else:
         for item in deduped:
-            articles.append(_to_article_dict(item))
+            articles.append(_filter_article_pii(_to_article_dict(item)))
 
     return {"articles": articles, "cost_tracker": cost_tracker}
 
@@ -814,6 +822,33 @@ def human_flag_node(state: KBState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 内部辅助函数
 # ---------------------------------------------------------------------------
+
+
+def _filter_article_pii(article: dict[str, Any]) -> dict[str, Any]:
+    """对知识条目执行 PII 过滤（输出安全）。
+
+    对 ``title`` 和 ``summary`` 字段调用 :func:`filter_output`，
+    检测并掩码手机号 / 邮箱 / 身份证 / 信用卡 / IP 等个人身份信息。
+
+    Args:
+        article: 知识条目 dict。
+
+    Returns:
+        过滤后的知识条目 dict（原地修改并返回）。
+    """
+    for field_name in ("title", "summary"):
+        value = article.get(field_name, "")
+        if value:
+            filtered, detections = filter_output(value)
+            if detections:
+                logger.warning(
+                    "知识条目 %s 包含 PII: field=%s types=%s",
+                    article.get("article_id", "?"),
+                    field_name,
+                    detections,
+                )
+            article[field_name] = filtered
+    return article
 
 
 def _safe_float(value: Any) -> float:

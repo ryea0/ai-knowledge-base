@@ -119,15 +119,16 @@ def run_workflow(
     各节点通过 ``state["trace_id"]`` 传播链路追踪 ID。
 
     同时创建 :class:`CostGuard` 并通过 ContextVar 注入，
-    ``_call_llm`` 在每次 LLM 调用前后自动执行预算检查与成本记录。
-    工作流结束后保存成本报告到 ``knowledge/cost_report_{timestamp}.json``。
+    ``chat_completion`` 在每次 LLM 调用后自动执行成本记录与预算检查。
+    工作流结束后保存成本报告到 ``knowledge/cost_report_{timestamp}.json``，
+    并将 guard 实例放入返回状态的 ``"cost_guard"`` 键供调用方查看。
 
     Args:
         budget_yuan: 预算上限（元）。
         alert_threshold: 预警阈值（0~1）。
 
     Returns:
-        工作流最终状态 dict。
+        工作流最终状态 dict（含 ``"cost_guard"`` 键）。
     """
     trace_id = generate_trace_id()
 
@@ -149,6 +150,9 @@ def run_workflow(
                 config={"recursion_limit": _RECURSION_LIMIT},
             )
         )
+        # 将 CostGuard 放入结果，供调用方查看成本报告
+        # （ContextVar 在 finally 中会被 reset，外部无法再通过 get_cost_guard 获取）
+        result["cost_guard"] = guard
     finally:
         # 工作流结束后保存成本报告
         try:
@@ -208,9 +212,9 @@ if __name__ == "__main__":
                 usage.get("prompt_tokens", 0),
                 usage.get("completion_tokens", 0),
             )
-    from src.common.cost_guard import get_cost_guard
+    from src.common.cost_guard import CostGuard
 
-    guard = get_cost_guard()
+    guard: CostGuard | None = final_state.get("cost_guard")
     if guard is not None and guard.records:
         report = guard.get_report()
         summary = report["summary"]

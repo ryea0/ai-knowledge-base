@@ -22,12 +22,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import litellm
 
+from src.common.cost_guard import CostGuard, cost_guard_var
 from src.llm.auth_adapter import build_auth_context
 from src.llm.orm import LlmModel, LlmProvider
 from src.llm.response import LLMResponse
@@ -43,6 +45,57 @@ logger = logging.getLogger(__name__)
 
 # 关闭 LiteLLM 自身的日志输出，避免污染标准输出
 litellm.suppress_debug_info = True
+
+# ---------------------------------------------------------------------------
+# CostGuard 获取（优先 ContextVar，回退懒加载全局单例）
+# ---------------------------------------------------------------------------
+
+#: 全局 CostGuard 单例，仅在未注入 ContextVar 时懒加载创建。
+_cost_guard_instance: CostGuard | None = None
+
+
+def get_cost_guard() -> CostGuard:
+    """获取当前上下文的 :class:`CostGuard` 实例。
+
+    查找顺序：
+        1. **ContextVar**（工作流注入）-- ``run_workflow`` 调用
+           :func:`set_cost_guard` 注入的 guard，各节点（含
+           ``ThreadPoolExecutor`` 子线程）通过 ContextVar 快照访问同一实例。
+        2. **全局懒加载单例** -- 非工作流场景（如 ``quick_chat`` 独立调用），
+           首次调用时从环境变量 ``BUDGET_YUAN`` 读取预算上限并创建实例，
+           后续复用同一实例。
+
+    ``BUDGET_YUAN`` 环境变量（仅懒加载路径使用）：
+        - 未设置或无法解析为 float 时，使用默认值 ``1.0``。
+        - 设为 ``0`` 时预算为 0，首次 record 后即超限（用于完全阻断）。
+
+    Returns:
+        当前 :class:`CostGuard` 实例（工作流注入或全局懒加载）。
+    """
+    global _cost_guard_instance
+
+    # 1. 优先使用 ContextVar 中注入的 guard（工作流场景）
+    guard = cost_guard_var.get()
+    if guard is not None:
+        return guard
+
+    # 2. 回退到全局懒加载单例（非工作流独立调用场景）
+    if _cost_guard_instance is None:
+        budget_str = os.environ.get("BUDGET_YUAN", "1.0")
+        try:
+            budget_yuan = float(budget_str)
+        except ValueError:
+            logger.warning(
+                "BUDGET_YUAN='%s' 无法解析为 float, 使用默认值 1.0",
+                budget_str,
+            )
+            budget_yuan = 1.0
+        _cost_guard_instance = CostGuard(budget_yuan=budget_yuan)
+        logger.info(
+            "全局 CostGuard 初始化(懒加载): budget_yuan=%.2f",
+            budget_yuan,
+        )
+    return _cost_guard_instance
 
 
 class LlmErrorType(Enum):
@@ -202,6 +255,7 @@ def chat_completion(
     max_tokens: int | None = None,
     stream: bool = False,
     session: Session | None = None,
+    node_name: str = "unknown",
     **kwargs: Any,
 ) -> LLMResponse | object:
     """调用 LLM 生成回复（非流式）。
@@ -215,6 +269,13 @@ def chat_completion(
     若传入 ``session``，调用成功/失败后会通知 :mod:`src.llm.health`
     更新模型健康状态。
 
+    调用成功后，通过 :func:`get_cost_guard` 获取 :class:`CostGuard` 实例，
+    记录本次调用的 token 用量与节点名称，随后检查预算是否超限
+    （超限抛 :class:`BudgetExceededError`）。
+
+    这是 CostGuard 的**唯一记录与检查入口**，调用方无需在外层重复
+    ``record`` / ``check``。
+
     Args:
         provider: 供应商 ORM 对象（含 base_url / api_key / 超时等配置）。
         model: 模型 ORM 对象（含 litellm_model 标识）。
@@ -223,6 +284,7 @@ def chat_completion(
         max_tokens: 最大输出 tokens，None 则使用模型默认值。
         stream: 是否流式输出。
         session: 可选的 SQLAlchemy Session，传入则联动健康状态更新和调用日志写入。
+        node_name: 发起调用的节点名称，用于成本追踪（默认 ``"unknown"``）。
         **kwargs: 透传给 LiteLLM ``completion()`` 的额外参数。
 
     Returns:
@@ -231,6 +293,7 @@ def chat_completion(
 
     Raises:
         LlmCallError: 调用失败（网络 / 鉴权 / 模型不存在等），携带 error_type。
+        BudgetExceededError: 调用后预算超限（由 CostGuard.check 抛出）。
     """
     ctx = build_auth_context(provider)
 
@@ -352,6 +415,18 @@ def chat_completion(
         if budget_guard is not None:
             budget_guard.check_post_call(llm_response.cost)
 
+    # 全局 CostGuard：记录 token 用量并检查预算是否超限
+    cost_guard = get_cost_guard()
+    cost_guard.record(
+        node_name,
+        {
+            "prompt_tokens": llm_response.usage.prompt_tokens,
+            "completion_tokens": llm_response.usage.completion_tokens,
+        },
+        model=model.model_code,
+    )
+    cost_guard.check()
+
     return llm_response
 
 
@@ -364,6 +439,7 @@ def chat_completion_with_retry(
     max_tokens: int | None = None,
     stream: bool = False,
     session: Session | None = None,
+    node_name: str = "unknown",
     **kwargs: Any,
 ) -> LLMResponse | object:
     """带策略重试的 LLM 调用。
@@ -383,6 +459,7 @@ def chat_completion_with_retry(
         stream: 是否流式输出。
         session: 可选的 SQLAlchemy Session，传入则联动健康状态更新和调用日志写入。
             每次 ``chat_completion`` 尝试（含重试）都会写一行 call_log。
+        node_name: 发起调用的节点名称，透传给 :func:`chat_completion` 用于成本追踪。
 
         **kwargs: 透传给 LiteLLM 的额外参数。
 
@@ -392,6 +469,7 @@ def chat_completion_with_retry(
 
     Raises:
         LlmCallError: 所有重试耗尽后仍失败，抛出最后一次异常。
+        BudgetExceededError: 调用后预算超限（由 CostGuard.check 抛出）。
     """
     attempt = 0
 
@@ -405,6 +483,7 @@ def chat_completion_with_retry(
                 max_tokens=max_tokens,
                 stream=stream,
                 session=session,
+                node_name=node_name,
                 **kwargs,
             )
         except LlmCallError as exc:
@@ -588,6 +667,7 @@ def quick_chat(
     system_prompt: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
+    node_name: str = "unknown",
 ) -> str:
     """一句话调用 LLM 的便捷函数。
 
@@ -603,6 +683,8 @@ def quick_chat(
         system_prompt: 可选的 system 消息，用于设定角色或上下文。
         temperature: 采样温度，默认 0.7。
         max_tokens: 最大输出 tokens，None 则使用模型默认值。
+        node_name: 发起调用的节点名称，透传给 ``chat_completion_with_retry``
+            用于成本追踪。
 
     Returns:
         LLM 生成的回复文本。
@@ -631,6 +713,7 @@ def quick_chat(
         temperature=temperature,
         max_tokens=max_tokens,
         session=session,
+        node_name=node_name,
     )
 
     return response.content if isinstance(response, LLMResponse) else str(response)
@@ -649,5 +732,6 @@ __all__ = [
     "TimeoutRetryStrategy",
     "chat_completion",
     "chat_completion_with_retry",
+    "get_cost_guard",
     "quick_chat",
 ]

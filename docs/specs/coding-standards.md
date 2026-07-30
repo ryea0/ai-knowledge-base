@@ -61,6 +61,7 @@
 | `TELEGRAM_BOT_TOKEN`        | Telegram Bot Token            | 否\* | 未配置则跳过该渠道       |
 | `FEISHU_WEBHOOK_URL`        | 飞书 Webhook 地址             | 否\* | 未配置则跳过该渠道       |
 | `GITHUB_TOKEN`              | GitHub API Token（提升限速）  | 否   | 未配置走匿名（限速更低） |
+| `BUDGET_YUAN`               | 工作流全局预算守卫上限（元）  | 否   | `10.0`                   |
 
 \* `TELEGRAM_BOT_TOKEN` 与 `FEISHU_WEBHOOK_URL` 至少配置一个，否则分发无可用渠道。
 
