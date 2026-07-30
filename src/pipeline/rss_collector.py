@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from src.collectors.base import HTTP_TIMEOUT_SECONDS, MAX_RETRIES, RETRY_BACKOFF_MAX
+from src.collectors.constants import HTTP_TIMEOUT_SECONDS, MAX_RETRIES, RETRY_BACKOFF_MAX
 
 logger = logging.getLogger(__name__)
 

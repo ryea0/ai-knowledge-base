@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from src.collectors.base import (
+from src.collectors.constants import (
     HTTP_TIMEOUT_SECONDS,
     MAX_RETRIES,
     RETRY_BACKOFF_BASE,

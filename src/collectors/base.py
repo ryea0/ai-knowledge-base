@@ -26,13 +26,26 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
+from src.collectors.constants import (
+    HTTP_TIMEOUT_SECONDS,
+    MAX_RETRIES,
+    MAX_WORKERS,
+    RETRY_BACKOFF_BASE,
+    RETRY_BACKOFF_MAX,
+)
+
 logger = logging.getLogger(__name__)
 
-MAX_WORKERS = 5
-HTTP_TIMEOUT_SECONDS = 30
-MAX_RETRIES = 3
-RETRY_BACKOFF_BASE = 1.0
-RETRY_BACKOFF_MAX = 60.0
+__all__ = [
+    "BaseCollector",
+    "CollectorRegistry",
+    "HTTP_TIMEOUT_SECONDS",
+    "MAX_RETRIES",
+    "MAX_WORKERS",
+    "RETRY_BACKOFF_BASE",
+    "RETRY_BACKOFF_MAX",
+    "default_registry",
+]
 
 
 class BaseCollector(ABC):
@@ -151,10 +164,3 @@ class CollectorRegistry:
 
 # 全局默认注册中心实例
 default_registry = CollectorRegistry()
-
-
-__all__ = [
-    "BaseCollector",
-    "CollectorRegistry",
-    "default_registry",
-]

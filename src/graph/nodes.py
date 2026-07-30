@@ -27,7 +27,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from src.collectors import default_registry
+from src.collectors import default_registry, ensure_registered
 from src.common.cost_guard import BudgetExceededError
 from src.common.trace import set_trace_id
 from src.config.database import get_session_factory, session_scope
@@ -314,6 +314,9 @@ def collect_node(state: KBState) -> dict[str, Any]:
         状态更新 dict，包含 ``sources``，可能包含 ``errors``。
     """
     _set_trace_from_state(state)
+
+    # 确保内置采集器已注册（惰性导入下不会在 import 时自动注册）
+    ensure_registered()
 
     errors: list[dict[str, Any]] = list(state.get("errors", []))
     sources: list[dict[str, Any]] = []
