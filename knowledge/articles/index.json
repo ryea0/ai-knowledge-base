@@ -75,5 +75,89 @@
     "source_url": "https://openai.com/index/chatgpt-for-academic-researchers",
     "category": "news",
     "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0025",
+    "title": "Superpowers: Agentic Skills 框架与软件开发方法学",
+    "source_url": "https://github.com/obra/superpowers",
+    "category": "tool",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0026",
+    "title": "ECC：AI 编码 Agent 性能优化系统",
+    "source_url": "https://github.com/affaan-m/ECC",
+    "category": "tool",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0027",
+    "title": "NousResearch Hermes Agent 智能体框架",
+    "source_url": "https://github.com/NousResearch/hermes-agent",
+    "category": "tool",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0028",
+    "title": "推进性价比边界：GPT-5.6",
+    "source_url": "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/",
+    "category": "model_release",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0029",
+    "title": "Gemini Robotics 2 将全身智能引入机器人",
+    "source_url": "https://deepmind.google/blog/gemini-robotics-2-brings-whole-body-intelligence-to-robots/",
+    "category": "model_release",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0030",
+    "title": "EU法院裁定VPN为合法技术工具",
+    "source_url": "https://remysharp.com/links/2026-07-23-35890312",
+    "category": "news",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0031",
+    "title": "为什么每个 Wikimedian 都应该成为 toolmaker",
+    "source_url": "https://www.haykranen.nl/2026/07/30/wikimania-2026-every-wikimedian-toolmaker/",
+    "category": "news",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0032",
+    "title": "用 Rust 编写 PHP 虚拟机（借助 AI 辅助）",
+    "source_url": "https://jolicode.com/blog/writing-the-php-virtual-machine-in-rust-with-a-lot-of-help-from-ai",
+    "category": "tutorial",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0033",
+    "title": "数学的至暗时刻",
+    "source_url": "https://kirwinhampshire.substack.com/p/the-dark-night-of-mathematics",
+    "category": "paper",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0034",
+    "title": "推进性价比前沿：GPT-5.6 发布",
+    "source_url": "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6",
+    "category": "model_release",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0035",
+    "title": "如何通过启用两项设置在 ARC-AGI-3 基准测试上实现得分三倍提升",
+    "source_url": "https://openai.com/index/how-two-settings-tripled-our-arc-agi-3-scores",
+    "category": "news",
+    "status": "pending"
+  },
+  {
+    "article_id": "kb-20260730-0036",
+    "title": "OpenAI 为学术研究人员提供 ChatGPT 免费访问权限",
+    "source_url": "https://openai.com/index/chatgpt-for-academic-researchers",
+    "category": "news",
+    "status": "pending"
   }
 ]

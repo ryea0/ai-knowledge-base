@@ -1,0 +1,26 @@
+{
+  "article_id": "kb-20260730-0029",
+  "title": "Gemini Robotics 2 将全身智能引入机器人",
+  "source_url": "https://deepmind.google/blog/gemini-robotics-2-brings-whole-body-intelligence-to-robots/",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "DeepMind 发布了 Gemini Robotics 2，旨在为机器人带来全身智能。该模型提升了机器人在复杂环境中的感知、推理与交互能力，使其能更流畅地执行全身协调动作。此项发布在技术社区引发了广泛讨论。",
+  "content_path": "",
+  "tags": [
+    "gemini",
+    "robotics",
+    "deepmind",
+    "embodied-ai",
+    "ai",
+    "vlm",
+    "whole-body-intelligence"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "zh",
+  "collected_at": "2026-07-30T20:12:55.139648+00:00",
+  "analyzed_at": "2026-07-30T20:12:55.139648+00:00",
+  "published_at": null,
+  "published_channels": null,
+  "score": 8
+}

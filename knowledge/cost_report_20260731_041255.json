@@ -1,0 +1,28 @@
+{
+  "summary": {
+    "total_prompt_tokens": 1175,
+    "total_completion_tokens": 1083,
+    "total_cost_yuan": 0.003341,
+    "budget_yuan": 10.0,
+    "usage_ratio": 0.0003,
+    "call_count": 1
+  },
+  "by_node": {
+    "review": {
+      "call_count": 1,
+      "prompt_tokens": 1175,
+      "completion_tokens": 1083,
+      "cost_yuan": 0.003341
+    }
+  },
+  "records": [
+    {
+      "timestamp": "2026-07-31T04:12:55.133048",
+      "node_name": "review",
+      "prompt_tokens": 1175,
+      "completion_tokens": 1083,
+      "cost_yuan": 0.003341,
+      "model": "ark-code-latest"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "article_id": "kb-20260730-0034",
+  "title": "推进性价比前沿：GPT-5.6 发布",
+  "source_url": "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "OpenAI 推出了 GPT-5.6 模型，并宣布降低 Luna 和 Terra 版本的定价。此举旨在通过更高效的模型，帮助企业以更低的成本大规模部署 AI 工作流，进一步推进大模型的性价比边界。",
+  "content_path": "",
+  "tags": [
+    "openai",
+    "gpt-5.6",
+    "llm",
+    "pricing",
+    "enterprise",
+    "ai-deployment"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T20:12:55.139731+00:00",
+  "analyzed_at": "2026-07-30T20:12:55.139731+00:00",
+  "published_at": null,
+  "published_channels": null,
+  "score": 8
+}

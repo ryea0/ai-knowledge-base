@@ -1,0 +1,25 @@
+{
+  "article_id": "kb-20260730-0033",
+  "title": "数学的至暗时刻",
+  "source_url": "https://kirwinhampshire.substack.com/p/the-dark-night-of-mathematics",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "本文探讨了人工智能在高级数学推理中的局限性与现状。尽管大语言模型在文本生成上表现优异，但在严格的数学证明与深层逻辑推理方面仍面临巨大瓶颈。文章反思了当前AI工具无法真正理解数学本质的问题，强调了人类直觉在数学研究中的核心地位。",
+  "content_path": "",
+  "tags": [
+    "mathematics",
+    "ai",
+    "llm",
+    "reasoning",
+    "philosophy",
+    "essay"
+  ],
+  "category": "paper",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T20:12:55.139716+00:00",
+  "analyzed_at": "2026-07-30T20:12:55.139716+00:00",
+  "published_at": null,
+  "published_channels": null,
+  "score": 7
+}
