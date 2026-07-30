@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "total_prompt_tokens": 0,
+    "total_completion_tokens": 0,
+    "total_cost_yuan": 0.0,
+    "budget_yuan": 10.0,
+    "usage_ratio": 0.0,
+    "call_count": 0
+  },
+  "by_node": {},
+  "records": []
+}

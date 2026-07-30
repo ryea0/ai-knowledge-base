@@ -1,0 +1,30 @@
+{
+  "article_id": "kb-20260730-4bd02516",
+  "title": "Large Language Models and the Future of Programming by Peter Norvig (2023)",
+  "source_url": "https://www.youtube.com/watch?v=ia6aJIplmtc",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "本文分享了著名计算机科学家 Peter Norvig 关于大语言模型如何影响未来编程的见解。内容探讨了 AI 在代码生成、软件开发流程变革及程序员角色转变等方面的潜在影响，并在技术社区引发了广泛讨论。",
+  "content_path": "knowledge/raw/kb-20260730-4bd02516.md",
+  "tags": [
+    "llm",
+    "programming",
+    "ai",
+    "future",
+    "peter-norvig",
+    "software-engineering"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:18Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "由人工智能领域泰斗 Peter Norvig 分享关于 LLM 的深刻见解。",
+    "探讨大语言模型对未来软件开发和编程范式的深远影响。",
+    "文章在 Hacker News 等技术社区引发了热烈讨论。"
+  ],
+  "score": 8
+}

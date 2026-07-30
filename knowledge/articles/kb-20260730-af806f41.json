@@ -1,0 +1,30 @@
+{
+  "article_id": "kb-20260730-af806f41",
+  "title": "How enabling two settings tripled our scores on the ARC-AGI-3 benchmark",
+  "source_url": "https://openai.com/index/how-two-settings-tripled-our-arc-agi-3-scores",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "文章介绍了通过启用两项API设置，使GPT-5.6在ARC-AGI-3基准测试中的得分提高了三倍。这两项设置分别是保留推理和启用压缩，它们不仅大幅提升了测试成绩，还优化了模型的运行效率。",
+  "content_path": "knowledge/raw/kb-20260730-af806f41.md",
+  "tags": [
+    "arc-agi-3",
+    "gpt-5.6",
+    "api-settings",
+    "benchmark",
+    "efficiency",
+    "llm"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:21Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "启用两项API设置使ARC-AGI-3基准测试得分提升了三倍。",
+    "通过保留推理功能增强了GPT-5.6的性能表现。",
+    "启用压缩设置在提升得分的同时优化了运行效率。"
+  ],
+  "score": 7
+}

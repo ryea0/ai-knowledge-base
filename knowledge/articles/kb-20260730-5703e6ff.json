@@ -1,0 +1,29 @@
+{
+  "article_id": "kb-20260730-5703e6ff",
+  "title": "Scientific computing in the age of agentic AI",
+  "source_url": "https://openai.com/index/scientific-computing-agentic-ai",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "该报告探讨了智能体AI时代的科学计算。科学家们正利用AI编码智能体来推动科学计算的现代化，从而加速软件开发，并在基因组学及其他领域加快科学发现的进程。",
+  "content_path": "knowledge/raw/kb-20260730-5703e6ff.md",
+  "tags": [
+    "ai agents",
+    "scientific computing",
+    "genomics",
+    "software development",
+    "field report"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:21Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "科学家正利用AI编码智能体实现科学计算的现代化。",
+    "AI智能体显著加速了科学软件的开发进程。",
+    "在基因组学等领域，AI技术正推动更快的科学发现。"
+  ],
+  "score": 7
+}

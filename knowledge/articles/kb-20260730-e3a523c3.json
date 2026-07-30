@@ -1,0 +1,30 @@
+{
+  "article_id": "kb-20260730-e3a523c3",
+  "title": "How GPT-5.6 fuses frontier intelligence with frontier efficiency",
+  "source_url": "https://openai.com/index/gpt-5-6-frontier-intelligence-efficiency",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "本文介绍了 GPT-5.6 如何将前沿智能与前沿效率相结合。该模型在模型层面、推理过程及智能体工作流中全面提升了 AI 效率，旨在以更低的成本提供更实用的智能服务。",
+  "content_path": "knowledge/raw/kb-20260730-e3a523c3.md",
+  "tags": [
+    "gpt-5.6",
+    "ai-efficiency",
+    "inference",
+    "agentic-workflows",
+    "openai",
+    "model-release"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:21Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "GPT-5.6 实现了前沿智能与高效计算的深度融合。",
+    "在模型设计、推理优化和智能体工作流方面均有显著提升。",
+    "大幅提高了每美元所能获取的实用智能性价比。"
+  ],
+  "score": 8
+}

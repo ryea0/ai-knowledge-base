@@ -394,29 +394,35 @@ def analyze_node(state: KBState) -> dict[str, Any]:
         logger.warning("无待分析条目")
         return {"analyses": []}
 
-    session = _get_session()
     cost_tracker: dict[str, Any] = dict(state.get("cost_tracker", {}))
     analyses: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = list(state.get("errors", []))
 
+    # 预查 provider/model 对，使用独立 session 后立即关闭
+    pre_session = _get_session()
     try:
-        # 缓存 provider/model 查询结果，避免循环内重复查 DB
-        pair = select_first_available(session)
-        if pair is None:
-            raise RuntimeError("无可用 LLM 供应商-模型组合")
-        provider, model = pair
+        pair = select_first_available(pre_session)
+    finally:
+        pre_session.close()
 
-        def _analyze_one(
-            item: dict[str, Any],
-        ) -> tuple[dict[str, Any], TokenUsage]:
-            """分析单条数据源。
+    if pair is None:
+        raise RuntimeError("无可用 LLM 供应商-模型组合")
 
-            Args:
-                item: 数据源摘要 dict。
+    def _analyze_one(
+        item: dict[str, Any],
+    ) -> tuple[dict[str, Any], TokenUsage]:
+        """分析单条数据源。
 
-            Returns:
-                (分析结果 dict, TokenUsage) 元组。
-            """
+        每次调用创建独立 DB Session，避免线程间共享导致连接损坏。
+
+        Args:
+            item: 数据源摘要 dict。
+
+        Returns:
+            (分析结果 dict, TokenUsage) 元组。
+        """
+        thread_session = _get_session()
+        try:
             prompt = (
                 f"仓库名称: {item.get('title', '')}\n"
                 f"仓库链接: {item.get('url', '')}\n"
@@ -426,7 +432,7 @@ def analyze_node(state: KBState) -> dict[str, Any]:
             )
             result, usage = _call_llm_json(
                 prompt,
-                session,
+                thread_session,
                 system_prompt=_ANALYZE_SYSTEM_PROMPT,
                 temperature=0.3,
                 context="analyze_node",
@@ -436,40 +442,51 @@ def analyze_node(state: KBState) -> dict[str, Any]:
             result["source_platform"] = item.get("source_platform", "")
             result["source_score"] = item.get("source_score", 0)
             return result, usage
+        finally:
+            thread_session.close()
 
-        with ThreadPoolExecutor(max_workers=_MAX_LLM_WORKERS) as pool:
-            futures = [pool.submit(_analyze_one, item) for item in sources]
-            for fut in futures:
-                try:
-                    analysis, usage = fut.result()
-                    _accumulate_usage(cost_tracker, "analyze", usage)
-                    analyses.append(analysis)
-                    logger.info(
-                        "分析完成: %s (score=%s)",
-                        analysis.get("title", "?"),
-                        analysis.get("score", "?"),
-                    )
-                except BudgetExceededError:
-                    logger.error("预算超限, 中止剩余分析")
-                    errors.append(
-                        {
-                            "node": "analyze",
-                            "error": "预算超限",
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        }
-                    )
-                    break
-                except LlmCallError as exc:
-                    logger.error("LLM 调用失败: %s", exc, exc_info=True)
-                    errors.append(
-                        {
-                            "node": "analyze",
-                            "error": str(exc),
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        }
-                    )
-    finally:
-        session.close()
+    with ThreadPoolExecutor(max_workers=_MAX_LLM_WORKERS) as pool:
+        futures = [pool.submit(_analyze_one, item) for item in sources]
+        for fut in futures:
+            try:
+                analysis, usage = fut.result()
+                _accumulate_usage(cost_tracker, "analyze", usage)
+                analyses.append(analysis)
+                logger.info(
+                    "分析完成: %s (score=%s)",
+                    analysis.get("title", "?"),
+                    analysis.get("score", "?"),
+                )
+            except BudgetExceededError:
+                logger.error("预算超限, 中止剩余分析")
+                errors.append(
+                    {
+                        "node": "analyze",
+                        "error": "预算超限",
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
+                break
+            except LlmCallError as exc:
+                logger.error("LLM 调用失败: %s", exc, exc_info=True)
+                errors.append(
+                    {
+                        "node": "analyze",
+                        "error": str(exc),
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
+            except Exception as exc:
+                logger.error(
+                    "分析失败（非 LLM 错误）: %s", exc, exc_info=True
+                )
+                errors.append(
+                    {
+                        "node": "analyze",
+                        "error": str(exc),
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
 
     result: dict[str, Any] = {
         "analyses": analyses,

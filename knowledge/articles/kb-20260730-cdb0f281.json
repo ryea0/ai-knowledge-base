@@ -1,0 +1,30 @@
+{
+  "article_id": "kb-20260730-cdb0f281",
+  "title": "Writing the PHP Virtual Machine in Rust (with a lot of help from AI)",
+  "source_url": "https://jolicode.com/blog/writing-the-php-virtual-machine-in-rust-with-a-lot-of-help-from-ai",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "作者分享了借助 AI 辅助，使用 Rust 语言编写 PHP 虚拟机的经验。该项目探讨了 Rust 在底层虚拟机开发中的优势，以及 AI 在复杂系统编程中提供的巨大帮助。这为高性能 PHP 运行时的探索提供了新思路。",
+  "content_path": "knowledge/raw/kb-20260730-cdb0f281.md",
+  "tags": [
+    "rust",
+    "php",
+    "vm",
+    "ai-coding",
+    "virtual-machine",
+    "programming"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:18Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "使用 Rust 语言重写 PHP 虚拟机，探索性能与安全性。",
+    "开发过程中大量依赖 AI 辅助编程，提升开发效率。",
+    "展示了现代系统编程语言结合 AI 在复杂底层项目中的实践。"
+  ],
+  "score": 7
+}

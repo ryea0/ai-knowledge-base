@@ -1,0 +1,29 @@
+{
+  "article_id": "kb-20260730-c949da0f",
+  "title": "You Could Have Come Up With Kimi Delta Attention",
+  "source_url": "https://blog.doubleword.ai/you-could-have-come-up-with-kimi-delta-attention",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "本文围绕“Kimi Delta Attention”机制展开讨论，指出该概念实际上非常直观，甚至读者自己也能想出。帖子提供了链接，引导大家前往 lobste.rs 社区参与关于该注意力机制的深度技术探讨。",
+  "content_path": "knowledge/raw/kb-20260730-c949da0f.md",
+  "tags": [
+    "kimi",
+    "delta-attention",
+    "attention-mechanism",
+    "llm",
+    "discussion"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:18Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "探讨了 Kimi Delta Attention 注意力机制的设计原理。",
+    "强调该机制的核心概念实际上非常直观易懂。",
+    "提供了指向 lobste.rs 社区深度技术讨论的链接。"
+  ],
+  "score": 6
+}

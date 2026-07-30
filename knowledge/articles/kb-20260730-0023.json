@@ -1,0 +1,26 @@
+{
+  "article_id": "kb-20260730-0023",
+  "title": "通过启用两个设置将 ARC-AGI-3 基准测试得分提高两倍",
+  "source_url": "https://openai.com/index/how-two-settings-tripled-our-arc-agi-3-scores",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "OpenAI 发文介绍了通过调整两个 API 设置（保留推理能力和启用压缩），大幅提升了 GPT-5.6 在 ARC-AGI-3 基准测试上的表现。这不仅使分数提高了两倍，还显著增强了运行效率，展示了针对复杂推理任务优化大模型参数的重要性。",
+  "content_path": "",
+  "tags": [
+    "openai",
+    "gpt-5.6",
+    "arc-agi-3",
+    "benchmark",
+    "api-optimization",
+    "reasoning",
+    "efficiency"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T20:09:58.120648+00:00",
+  "analyzed_at": "2026-07-30T20:09:58.120648+00:00",
+  "published_at": null,
+  "published_channels": null,
+  "score": 8
+}

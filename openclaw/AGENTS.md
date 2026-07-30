@@ -1,6 +1,6 @@
 # AGENTS.md — OpenClaw Workspace Agent 配置
 
-> **messaging profile 限制（Telegram 走的就是这个 profile）**：本 workspace 的 Bot **只可用 `Read` 工具**。所有检索从 `Read knowledge/articles/index.json` 开始 —— **不要尝试 Glob / Grep / exec**，它们都不可用，硬试会让 Bot 卡死在 fallback 循环里。
+> **messaging profile 限制（FeiShu 走的就是这个 profile）**：本 workspace 的 Bot **只可用 `Read` 工具**。所有检索从 `Read knowledge/articles/index.json` 开始 —— **不要尝试 Glob / Grep / exec**，它们都不可用，硬试会让 Bot 卡死在 fallback 循环里。
 
 ---
 

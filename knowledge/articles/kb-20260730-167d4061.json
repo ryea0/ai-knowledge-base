@@ -1,0 +1,30 @@
+{
+  "article_id": "kb-20260730-167d4061",
+  "title": "LLM Honeypot",
+  "source_url": "https://llm2human.pages.dev/",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "该项目名为 LLM Honeypot，是一个利用大语言模型模拟人类交互的安全防御工具。它旨在通过伪装成真实用户来引诱、消耗并识别恶意爬虫或自动化攻击脚本。该项目在 Hacker News 上获得了较高的关注度与社区讨论。",
+  "content_path": "knowledge/raw/kb-20260730-167d4061.md",
+  "tags": [
+    "llm",
+    "honeypot",
+    "cybersecurity",
+    "security",
+    "automation",
+    "tool"
+  ],
+  "category": "tool",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:15Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "利用大语言模型模拟人类行为构建网络蜜罐。",
+    "旨在有效迷惑和识别恶意自动化脚本及爬虫。",
+    "在 Hacker News 上获得数百积分和百余条热烈讨论。"
+  ],
+  "score": 8
+}

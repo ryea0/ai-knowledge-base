@@ -35,7 +35,7 @@ sources:
   - name: Anthropic Research
     url: https://www.anthropic.com/feed.xml
     category: company_blog
-    enabled: true
+    enabled: false  # 网站改版后已无 RSS feed，待找到替代源
 
   - name: Hugging Face Blog
     url: https://huggingface.co/blog/feed.xml

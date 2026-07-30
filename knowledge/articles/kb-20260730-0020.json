@@ -1,0 +1,25 @@
+{
+  "article_id": "kb-20260730-0020",
+  "title": "使用 Rust 编写 PHP 虚拟机（借助 AI 的力量）",
+  "source_url": "https://jolicode.com/blog/writing-the-php-virtual-machine-in-rust-with-a-lot-of-help-from-ai",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "这篇文章记录了作者如何在大量 AI 工具的辅助下，使用 Rust 语言从零开始编写 PHP 虚拟机的过程。文章分享了在底层系统编程中结合大语言模型进行开发的实践经验与挑战，展示了 AI 在复杂编译器实现中的潜力与局限。",
+  "content_path": "",
+  "tags": [
+    "rust",
+    "php",
+    "virtual-machine",
+    "ai-coding",
+    "compiler",
+    "llm"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T20:09:58.120605+00:00",
+  "analyzed_at": "2026-07-30T20:09:58.120605+00:00",
+  "published_at": null,
+  "published_channels": null,
+  "score": 8
+}

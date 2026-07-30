@@ -114,6 +114,24 @@ def build_graph() -> Any:
     return compiled
 
 
+def _publish_digest_after_workflow() -> None:
+    """工作流完成后自动推送每日简报到飞书等渠道。
+
+    从环境变量构造 :class:`FeishuPublisher`，调用 :func:`publish_daily_digest`
+    生成当日简报并推送。推送失败不影响工作流主流程（调用方已 catch）。
+    """
+    import asyncio
+
+    from src.distributors.publisher import publish_daily_digest
+
+    results = asyncio.run(publish_daily_digest())
+    for r in results:
+        if r.success:
+            logger.info("简报推送成功: channel=%s", r.channel)
+        else:
+            logger.warning("简报推送失败: channel=%s error=%s", r.channel, r.error)
+
+
 def run_workflow(
     *,
     budget_yuan: float = _DEFAULT_BUDGET_YUAN,
@@ -180,6 +198,12 @@ def run_workflow(
             guard.save_report()
         except Exception:
             logger.warning("保存成本报告失败", exc_info=True)
+        # 工作流完成后自动推送每日简报（失败不影响主流程）
+        if result.get("saved_count", 0) > 0:
+            try:
+                _publish_digest_after_workflow()
+            except Exception:
+                logger.warning("每日简报推送失败, 已忽略", exc_info=True)
         # 恢复 ContextVar 原值
         cost_guard_var.reset(token)
         metrics_collector_var.reset(metrics_token)

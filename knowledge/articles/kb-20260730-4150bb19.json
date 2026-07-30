@@ -1,0 +1,30 @@
+{
+  "article_id": "kb-20260730-4150bb19",
+  "title": "Google will expand age checks on Android worldwide till the end of the year",
+  "source_url": "https://android-developers.googleblog.com/2026/07/google-play-age-signals-api-safer-experiences.html",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "Google 宣布将在今年年底前在全球范围内扩展 Android 平台的年龄验证机制。该功能主要通过 Google Play 的年龄信号 API 实现，旨在为年轻用户提供更安全的数字体验。此项政策更新在技术社区引发了广泛的关注与讨论。",
+  "content_path": "knowledge/raw/kb-20260730-4150bb19.md",
+  "tags": [
+    "google",
+    "android",
+    "age-verification",
+    "google-play",
+    "safety",
+    "policy"
+  ],
+  "category": "news",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:15Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "Google 计划在年底前于全球范围扩展 Android 的年龄检查。",
+    "引入 Google Play 年龄信号 API 以增强平台安全性。",
+    "该动态在 HackerNews 上获得了极高的社区活跃度和讨论量。"
+  ],
+  "score": 8
+}

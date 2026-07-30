@@ -1,0 +1,31 @@
+{
+  "article_id": "kb-20260730-9d64250d",
+  "title": "Gemini Robotics 2 brings whole body intelligence to robots",
+  "source_url": "https://deepmind.google/blog/gemini-robotics-2-brings-whole-body-intelligence-to-robots/",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "Google DeepMind 发布了 Gemini Robotics 2 模型，旨在为机器人带来全身智能。该模型提升了机器人的动作协调与环境适应能力，使其能更好地执行复杂任务。此发布在 HackerNews 上引发了社区的广泛关注与讨论。",
+  "content_path": "knowledge/raw/kb-20260730-9d64250d.md",
+  "tags": [
+    "gemini",
+    "robotics",
+    "deepmind",
+    "ai",
+    "embodied-ai",
+    "google"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "en",
+  "collected_at": "2026-07-30T18:58:15Z",
+  "analyzed_at": "2026-07-30T19:03:10Z",
+  "published_at": null,
+  "published_channels": null,
+  "highlights": [
+    "Google DeepMind 正式发布 Gemini Robotics 2 模型。",
+    "该模型致力于实现机器人的全身智能与动作协调。",
+    "显著提升了机器人适应复杂环境和交互的能力。",
+    "在 HackerNews 社区引发了热烈讨论，获得较高关注度。"
+  ],
+  "score": 8
+}

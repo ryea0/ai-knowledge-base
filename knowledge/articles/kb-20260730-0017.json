@@ -1,0 +1,25 @@
+{
+  "article_id": "kb-20260730-0017",
+  "title": "OpenAI 发布 GPT-5.6：推进性价比前沿",
+  "source_url": "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/",
+  "source_platform": "hackernews",
+  "source_score": 0,
+  "summary": "OpenAI 推出全新模型 GPT-5.6，旨在进一步推进大模型的价格与性能边界。该模型在保持卓越性能的同时大幅降低了调用成本，为开发者提供更具性价比的选择。这标志着大模型商业化应用的进一步成熟。",
+  "content_path": "",
+  "tags": [
+    "openai",
+    "gpt-5.6",
+    "llm",
+    "ai",
+    "model_release",
+    "price-performance"
+  ],
+  "category": "model_release",
+  "status": "pending",
+  "language": "zh",
+  "collected_at": "2026-07-30T20:09:58.120551+00:00",
+  "analyzed_at": "2026-07-30T20:09:58.120551+00:00",
+  "published_at": null,
+  "published_channels": null,
+  "score": 8
+}
