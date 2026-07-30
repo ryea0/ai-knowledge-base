@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/DistributionView.vue'),
         meta: { title: '分发渠道' },
       },
+      {
+        path: 'metrics',
+        name: 'Metrics',
+        component: () => import('@/views/MetricsView.vue'),
+        meta: { title: '指标监控' },
+      },
     ],
   },
 ]

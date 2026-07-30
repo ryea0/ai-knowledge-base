@@ -31,6 +31,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from src.api.llm_routes import router as llm_router
+from src.api.metrics_routes import router as metrics_router
 from src.common.exception_handler import GlobalExceptionHandler
 from src.common.health import (
     AppInfo,
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     _register_health_routes(app)
 
     app.include_router(llm_router)
+    app.include_router(metrics_router)
 
     logger.info("FastAPI 应用创建完成")
     return app

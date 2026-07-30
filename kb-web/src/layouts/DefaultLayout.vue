@@ -7,6 +7,7 @@ import {
   DataBoard,
   Operation,
   Promotion,
+  TrendCharts,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -26,6 +27,7 @@ const menuItems: MenuItem[] = [
   { index: '/llm/providers', title: 'LLM 管理', icon: Setting },
   { index: '/workflow', title: '工作流', icon: Operation },
   { index: '/distributors', title: '分发渠道', icon: Promotion },
+  { index: '/metrics', title: '指标监控', icon: TrendCharts },
 ]
 
 function handleSelect(index: string): void {
