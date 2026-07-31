@@ -25,6 +25,8 @@ spec:
             - name: kb-app
               image: kb-app:latest
               imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "src.main"]
+              args: ["--stage", "all"]
               envFrom:
                 - configMapRef:
                     name: kb-config

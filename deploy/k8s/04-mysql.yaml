@@ -103,8 +103,9 @@ spec:
   selector:
     app.kubernetes.io/name: ai-knowledge-base
     app.kubernetes.io/component: mysql
----
-# init.sql ConfigMap - 建表 DDL
+
+# MySQL init SQL ConfigMap - 完整建表 DDL（来自 deploy/sql/）
+# 此文件由 deploy/sql/ 下所有 .sql 文件合并生成，修改 DDL 须同步更新 deploy/sql/
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -114,32 +115,379 @@ metadata:
     app.kubernetes.io/name: ai-knowledge-base
 immutable: true
 data:
-  init.sql: |
+  01_kb_llm_provider.sql: |
+    -- kb_llm_provider LLM 供应商表
+    -- 仅存储连接配置和鉴权信息，健康状态移至 kb_llm_health（模型级）。
+    -- DDL 定义见 docs/specs/llm-provider.md §9.1 / docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_llm_provider (
+        id                      BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        provider_code           VARCHAR(40)      NOT NULL                COMMENT '供应商代码，如 deepseek/ark/openai/ollama',
+        display_name            VARCHAR(80)      NOT NULL                COMMENT '展示名称',
+        provider_type           TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '类型 0=cloud 1=local，枚举 LlmProviderType',
+        base_url                VARCHAR(255)     NOT NULL                COMMENT 'API 基础 URL',
+        litellm_provider        VARCHAR(40)      NOT NULL                COMMENT 'LiteLLM 供应商标识，决定协议族和模型前缀，如 openai/ollama',
+        -- 鉴权（auth_config JSON 已拆为显式列）
+        auth_type               TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '鉴权方式 0=bearer 1=oauth 2=header 3=none，枚举 LlmAuthType',
+        api_key_encrypted       VARCHAR(255)     NULL                    COMMENT '加密主凭证，须应用层加解密，none 类型为 NULL',
+        secret_key_encrypted    VARCHAR(255)     NULL                    COMMENT '加密二次凭证，仅 auth_type=oauth 使用',
+        header_name             VARCHAR(100)     NULL                    COMMENT '自定义鉴权 header 名，仅 auth_type=header 使用',
+        token_url               VARCHAR(255)     NULL                    COMMENT 'OAuth token 交换地址，仅 auth_type=oauth 使用',
+        -- 路由与限流
+        is_enabled              TINYINT(1) UNSIGNED NOT NULL DEFAULT 1   COMMENT '是否启用 0=禁用 1=启用',
+        priority                INT              NOT NULL DEFAULT 100    COMMENT '路由优先级，数值越小优先级越高，同优先级按 id 升序',
+        timeout_seconds         INT              NOT NULL DEFAULT 30     COMMENT '单次请求超时秒数，local 类型建议 120+',
+        max_retries             INT              NOT NULL DEFAULT 3      COMMENT '最大重试次数上限（按错误类型策略取 min）',
+        rpm_limit               INT              NOT NULL DEFAULT 0      COMMENT '每分钟请求上限，0=不限速（预留，一期不实现）',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted              TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at              DATETIME(3)      NULL                    COMMENT '软删除时间',
+        -- provider_code 唯一约束：软删除行 guard 列为 NULL（允许多个），未删除行为 'code:{provider_code}'
+        provider_code_guard     VARCHAR(46)      AS (CASE WHEN is_deleted=0 THEN CONCAT('code:',provider_code) ELSE NULL END) STORED COMMENT 'provider_code 唯一约束辅助列，软删除行排除',
+        created_at              DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at              DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_provider_code_guard (provider_code_guard),
+        KEY idx_enabled_priority (is_enabled, priority),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='LLM 供应商表';
+    
+  02_kb_llm_model.sql: |
+    -- kb_llm_model LLM 模型表
+    -- DDL 定义见 docs/specs/llm-provider.md §9.1 / docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_llm_model (
+        id                        BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        provider_id               BIGINT UNSIGNED  NOT NULL                COMMENT '所属供应商 kb_llm_provider.id（应用层维护关联）',
+        model_code                VARCHAR(80)      NOT NULL                COMMENT '模型标识，如 deepseek-chat / llama3.2',
+        litellm_model             VARCHAR(120)     NOT NULL                COMMENT 'LiteLLM 完整模型标识，如 deepseek/deepseek-chat / ollama/llama3.2',
+        display_name              VARCHAR(120)     NOT NULL                COMMENT '展示名称',
+        description               VARCHAR(255)     NULL                    COMMENT '模型描述',
+        context_window            INT              NOT NULL DEFAULT 4096   COMMENT '上下文窗口大小 tokens',
+        max_output_tokens         INT              NOT NULL DEFAULT 4096   COMMENT '最大输出 tokens',
+        supports_streaming        TINYINT(1) UNSIGNED NOT NULL DEFAULT 1   COMMENT '是否支持流式输出',
+        supports_function_calling TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否支持函数调用',
+        supports_vision           TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否支持视觉/多模态',
+        supports_reasoning        TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否为推理模型（content 空 / reasoning_content / thinking_blocks）',
+        task_type                 JSON             NULL                    COMMENT '任务类型数组，如 ["TextGeneration"]、["VisualQuestionAnswering"]',
+        input_price_per_1m        DECIMAL(10,4)    NOT NULL DEFAULT 0.0000 COMMENT '输入每百万 token 价格，币种见 currency 列，local=0',
+        output_price_per_1m       DECIMAL(10,4)    NOT NULL DEFAULT 0.0000 COMMENT '输出每百万 token 价格，币种见 currency 列，local=0',
+        currency                  CHAR(3)          NOT NULL DEFAULT 'CNY'  COMMENT '计费币种：CNY=人民币, USD=美元',
+        is_enabled                TINYINT(1) UNSIGNED NOT NULL DEFAULT 1   COMMENT '是否启用',
+        is_default                TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否为该供应商默认模型，每供应商至多1个',
+        source                    TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '来源 0=preset 1=discovered 2=manual，枚举 LlmModelSource',
+        -- 每供应商至多一个默认模型：is_default=1 且未删除时 default_guard='p:{provider_id}'，唯一约束保证；其余为 NULL
+        default_guard             VARCHAR(40)      AS (CASE WHEN is_default=1 AND is_deleted=0 THEN CONCAT('p:',provider_id) ELSE NULL END) STORED COMMENT '默认模型唯一约束辅助列',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted                TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at                DATETIME(3)      NULL                    COMMENT '软删除时间',
+        -- (provider_id, model_code) 唯一约束：软删除行 guard 列为 NULL，未删除行为 'pm:{provider_id}:{model_code}'
+        provider_model_guard      VARCHAR(130)     AS (CASE WHEN is_deleted=0 THEN CONCAT('pm:',provider_id,':',model_code) ELSE NULL END) STORED COMMENT '(provider_id,model_code) 唯一约束辅助列，软删除行排除',
+        created_at                DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at                DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_default_guard (default_guard),
+        UNIQUE KEY uk_provider_model_guard (provider_model_guard),
+        KEY idx_provider_enabled (provider_id, is_enabled),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='LLM 模型表';
+    
+  03_kb_llm_health.sql: |
+    -- kb_llm_health LLM 模型健康状态表
+    -- 模型级当前健康状态（upsert 语义），替代旧的 kb_llm_health_log（append-only 日志）。
+    -- 每个模型至多一行，由 uk_model_health_guard 保证。
+    -- 创建模型时自动创建对应 health 行（health_status=unknown），删除模型时同步软删除。
+    -- DDL 定义见 docs/specs/llm-provider.md §9.1-9.2 / docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_llm_health (
+        id                      BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        provider_id             BIGINT UNSIGNED  NOT NULL                COMMENT '供应商 kb_llm_provider.id（应用层维护关联）',
+        model_id                BIGINT UNSIGNED  NOT NULL                COMMENT '模型 kb_llm_model.id（每个模型一行）',
+        health_status           TINYINT UNSIGNED NOT NULL DEFAULT 3      COMMENT '健康状态 0=healthy 1=degraded 2=unhealthy 3=unknown，枚举 LlmHealthStatus',
+        consecutive_failures    INT              NOT NULL DEFAULT 0      COMMENT '连续失败次数，成功时归零',
+        failure_threshold       INT              NOT NULL DEFAULT 5      COMMENT '连续失败达此值时 health_status 转 unhealthy',
+        health_check_enabled    TINYINT(1) UNSIGNED NOT NULL DEFAULT 1   COMMENT '是否启用健康检查',
+        last_check_at           DATETIME(3)      NULL                    COMMENT '最近健康检查时间',
+        last_success_at         DATETIME(3)      NULL                    COMMENT '最近成功时间',
+        last_failure_at         DATETIME(3)      NULL                    COMMENT '最近失败时间',
+        last_latency_ms         INT              NULL                    COMMENT '最近检查延迟毫秒',
+        last_error              VARCHAR(500)     NULL                    COMMENT '最近错误信息（须脱敏，禁止含 API Key）',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted              TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at              DATETIME(3)      NULL                    COMMENT '软删除时间',
+        -- model_id 唯一约束：软删除行 guard 列为 NULL，未删除行为 'mh:{model_id}'
+        model_health_guard      VARCHAR(30)      AS (CASE WHEN is_deleted=0 THEN CONCAT('mh:',model_id) ELSE NULL END) STORED COMMENT 'model_id 唯一约束辅助列，每模型至多一行健康状态',
+        created_at              DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at              DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_model_health_guard (model_health_guard),
+        KEY idx_provider_status (provider_id, health_status),
+        KEY idx_model_id (model_id),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='LLM 模型健康状态表';
+    
+  04_kb_llm_provider_connectivity.sql: |
+    -- kb_llm_provider_connectivity 供应商联通性状态表
+    -- 供应商级当前联通性（upsert 语义），每个供应商至多一行。
+    -- 由定时任务（每 5 分钟）或手动触发连通性测试时写入/更新。
+    -- DDL 约定见 docs/specs/db-conventions.md §7，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_llm_provider_connectivity (
+        id                BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        provider_id       BIGINT UNSIGNED  NOT NULL                COMMENT '供应商 kb_llm_provider.id（应用层维护关联）',
+        is_connected      TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否连通 0=否 1=是',
+        latency_ms        INT              NULL                    COMMENT '最近探测延迟毫秒',
+        last_check_at     DATETIME(3)      NULL                    COMMENT '最近探测时间',
+        last_success_at   DATETIME(3)      NULL                    COMMENT '最近成功时间',
+        last_failure_at   DATETIME(3)      NULL                    COMMENT '最近失败时间',
+        last_error        VARCHAR(500)     NULL                    COMMENT '最近错误信息（须脱敏，禁止含 API Key）',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted        TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at        DATETIME(3)      NULL                    COMMENT '软删除时间',
+        -- provider_id 唯一约束：软删除行 guard 列为 NULL，未删除行为 'pc:{provider_id}'
+        provider_connectivity_guard VARCHAR(40) AS (CASE WHEN is_deleted=0 THEN CONCAT('pc:',provider_id) ELSE NULL END) STORED COMMENT 'provider_id 唯一约束辅助列，每供应商至多一行联通状态',
+        created_at        DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at        DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_provider_connectivity_guard (provider_connectivity_guard),
+        KEY idx_provider_id (provider_id),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='LLM 供应商联通性状态表';
+    
+  05_kb_article.sql: |
+    -- kb_article 知识条目表
+    -- DDL 定义见 docs/specs/db-conventions.md §7.5，本文件由 MySQL 容器初始化时自动执行
+    -- article_id 由 DB 自增主键 id 生成（kb-YYYYMMDD-NNNN），天然唯一，无需软删除 guard 列
+    -- source_platform / category 存 VARCHAR 字符串名（非 TINYINT），见 src/models/enums.py 注释
+    
     CREATE TABLE IF NOT EXISTS kb_article (
-        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
-        article_id      VARCHAR(32)      NOT NULL                COMMENT '业务ID',
-        title           VARCHAR(120)     NOT NULL                COMMENT '条目标题',
-        source_url      VARCHAR(512)     NOT NULL                COMMENT '原始链接',
-        source_platform VARCHAR(20)      NOT NULL                COMMENT '来源平台',
-        source_score    INT              NOT NULL DEFAULT 0      COMMENT '来源热度',
-        summary         VARCHAR(500)     NOT NULL                COMMENT 'AI生成中文摘要',
-        content_path    VARCHAR(255)     NOT NULL                COMMENT '原始内容文件路径',
-        tags            JSON             NOT NULL                COMMENT '标签数组',
-        category        VARCHAR(20)      NOT NULL                COMMENT '分类',
-        status          TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '状态',
-        language        CHAR(2)          NOT NULL DEFAULT 'zh'   COMMENT '原文语言',
-        collected_at    DATETIME(3)      NOT NULL                COMMENT '采集时间',
-        analyzed_at     DATETIME(3)      NULL                    COMMENT '分析完成时间',
-        published_at    DATETIME(3)      NULL                    COMMENT '发布时间',
-        published_channels JSON          NULL                    COMMENT '已推送渠道列表',
-        score              TINYINT UNSIGNED NULL                    COMMENT 'analyzer 评分 1-10（SPEC §4.10 扩展）',
-        score_reason       VARCHAR(500)     NULL                    COMMENT '评分理由（SPEC §4.10 扩展）',
-        highlights         JSON             NULL                    COMMENT '亮点数组（SPEC §4.10 扩展）',
-        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
-        updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        id                  BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键，同时作为 article_id 的序号源（NNNN），全局递增不按日重置',
+        article_id          VARCHAR(32)      NOT NULL                COMMENT '业务ID，格式 kb-YYYYMMDD-NNNN，NNNN=id 零填充至4位，id>9999 报错',
+        title               VARCHAR(120)     NOT NULL                COMMENT '条目标题（内容规范见 §6.2，DB 长度为上限）',
+        source_url          VARCHAR(512)     NOT NULL                COMMENT '原始链接',
+        source_platform     VARCHAR(20)      NOT NULL                COMMENT '来源平台 github_trending/hackernews，新增来源须同步更新 §4 与 src/models/enums.py',
+        source_score        INT              NOT NULL DEFAULT 0      COMMENT '来源热度',
+        summary             VARCHAR(500)     NOT NULL                COMMENT 'AI生成中文摘要（内容规范见 §6.3，DB 长度为上限）',
+        content_path        VARCHAR(255)     NOT NULL                COMMENT '原始内容文件路径',
+        tags                JSON             NOT NULL                COMMENT '标签数组',
+        category            VARCHAR(20)      NOT NULL                COMMENT '分类 model_release/paper/tool/tutorial/news，判定标准见 §6.5',
+        status              TINYINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '状态 0=pending 1=reviewed 2=published 3=archived，枚举定义见 src/models/enums.py ArticleStatus',
+        language            CHAR(2)          NOT NULL DEFAULT 'zh'   COMMENT '原文语言',
+        collected_at        DATETIME(3)      NOT NULL                COMMENT '采集时间',
+        analyzed_at         DATETIME(3)      NULL                    COMMENT '分析完成时间',
+        published_at        DATETIME(3)      NULL                    COMMENT '发布时间',
+        published_channels  JSON             NULL                    COMMENT '已推送渠道列表',
+        score               TINYINT UNSIGNED NULL                    COMMENT 'analyzer 评分 1-10（SPEC §4.10 扩展），未分析为 NULL',
+        score_reason        VARCHAR(500)     NULL                    COMMENT '评分理由（SPEC §4.10 扩展）',
+        highlights          JSON             NULL                    COMMENT '亮点数组（SPEC §4.10 扩展）',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted          TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at          DATETIME(3)      NULL                    COMMENT '软删除时间',
+        created_at          DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at          DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
         PRIMARY KEY (id),
         UNIQUE KEY uk_article_id (article_id),
         KEY idx_source_url (source_url(255)),
         KEY idx_status_created (status, created_at),
-        KEY idx_category (category)
+        KEY idx_category (category),
+        KEY idx_is_deleted (is_deleted)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='知识条目表';
+    
+  06_kb_workflow_run.sql: |
+    -- kb_workflow_run 工作流执行历史表
+    -- 记录每次工作流执行的 trace_id / 阶段 / 耗时 / 状态，供前端「工作流管理」页面展示
+    -- trace_id 为业务唯一标识（UUIDv4 前8位），全局唯一
+    -- DDL 约定见 docs/specs/db-conventions.md §7.1 / docs/specs/trace-spec.md §10，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_workflow_run (
+        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        trace_id        VARCHAR(16)      NOT NULL                COMMENT '链路追踪ID，UUIDv4 前8位十六进制，每次工作流执行唯一',
+        stage           VARCHAR(20)      NOT NULL                COMMENT '执行阶段 collect/analyze/curate/distribute/all',
+        status          VARCHAR(20)      NOT NULL DEFAULT 'running' COMMENT '执行状态 running/success/failed',
+        started_at      DATETIME(3)      NOT NULL                COMMENT '执行开始时间',
+        finished_at     DATETIME(3)      NULL                    COMMENT '执行结束时间，运行中为 NULL',
+        duration_ms     INT              NULL                    COMMENT '执行耗时毫秒，运行中为 NULL',
+        candidate_count INT              NOT NULL DEFAULT 0      COMMENT '采集候选条目数',
+        article_count   INT              NOT NULL DEFAULT 0      COMMENT '产出知识条目数',
+        error_summary   VARCHAR(500)     NULL                    COMMENT '错误摘要（脱敏后，禁止含 API Key）',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted      TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at      DATETIME(3)      NULL                    COMMENT '软删除时间',
+        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_trace_id (trace_id),
+        KEY idx_status_started (status, started_at),
+        KEY idx_stage_started (stage, started_at),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工作流执行历史表';
+    
+  07_kb_distribution_log.sql: |
+    -- kb_distribution_log 分发历史日志表
+    -- 记录每次分发的推送结果，供前端「分发渠道」页面展示分发历史和手动重发
+    -- 每条知识条目每次推送一行，成功/跳过/失败均记录
+    -- DDL 约定见 docs/specs/db-conventions.md §7.1 / docs/specs/content-spec.md §6.6，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_distribution_log (
+        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        article_id      VARCHAR(32)      NOT NULL                COMMENT '条目业务ID kb-YYYYMMDD-NNNN',
+        channel         VARCHAR(20)      NOT NULL                COMMENT '推送渠道 telegram/feishu',
+        result          VARCHAR(20)      NOT NULL                COMMENT '推送结果 success/skipped/failed',
+        attempted_at    DATETIME(3)      NOT NULL                COMMENT '推送尝试时间',
+        error_msg       VARCHAR(500)     NULL                    COMMENT '失败原因（脱敏后，禁止含 Token/Webhook URL）',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted      TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at      DATETIME(3)      NULL                    COMMENT '软删除时间',
+        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        KEY idx_article_id (article_id),
+        KEY idx_channel_result (channel, result),
+        KEY idx_attempted_at (attempted_at),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='分发历史日志表';
+    
+  08_kb_llm_call_log.sql: |
+    -- kb_llm_call_log LLM 调用计量日志表
+    -- 记录每次 LLM 调用的 token 用量和成本，用于供应商成本追踪和用量分析
+    -- 每次调用一行，成功/失败均记录（失败时 usage 为 NULL）
+    -- DDL 约定见 docs/specs/db-conventions.md §7.1，本文件由 MySQL 容器初始化时自动执行
+    
+    CREATE TABLE IF NOT EXISTS kb_llm_call_log (
+        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        trace_id        VARCHAR(16)      NOT NULL                COMMENT '链路追踪ID，关联工作流执行',
+        provider_id     BIGINT UNSIGNED  NOT NULL                COMMENT '供应商 kb_llm_provider.id',
+        model_id        BIGINT UNSIGNED  NOT NULL                COMMENT '模型 kb_llm_model.id',
+        is_success      TINYINT(1) UNSIGNED NOT NULL             COMMENT '0=失败 1=成功',
+        input_tokens    INT              NULL                    COMMENT '输入 token 数，失败时为 NULL',
+        output_tokens   INT              NULL                    COMMENT '输出 token 数，失败时为 NULL',
+        total_tokens    INT              NULL                    COMMENT '总 token 数，失败时为 NULL',
+        cost_amount     DECIMAL(10,6)    NULL                    COMMENT '预估成本金额，币种见 cost_currency 列，失败时为 NULL',
+        cost_currency   CHAR(3)          NULL                    COMMENT '成本币种：CNY=人民币, USD=美元，失败时为 NULL',
+        latency_ms      INT              NULL                    COMMENT '响应延迟毫秒，失败时为 NULL',
+        error_msg       VARCHAR(500)     NULL                    COMMENT '失败原因（脱敏后，禁止含 API Key）',
+        called_at       DATETIME(3)      NOT NULL                COMMENT '调用时间',
+        -- 软删除（见 docs/specs/db-conventions.md §7.1 必选字段）
+        is_deleted      TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否软删除 0=否 1=是',
+        deleted_at      DATETIME(3)      NULL                    COMMENT '软删除时间',
+        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+        updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+        PRIMARY KEY (id),
+        KEY idx_trace_id (trace_id),
+        KEY idx_provider_time (provider_id, called_at),
+        KEY idx_model_time (model_id, called_at),
+        KEY idx_called_at (called_at),
+        KEY idx_is_deleted (is_deleted)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='LLM 调用计量日志表';
+    
+  09_add_currency.sql: |
+    -- 迁移脚本：为 kb_llm_model 增加 currency 列，为 kb_llm_call_log 将 cost_usd 拆为 cost_amount + cost_currency
+    -- 适用于已有数据库的增量升级，新库由 02/08 DDL 直接包含新列
+    -- 幂等设计：MySQL 8.0 不支持 ADD COLUMN IF NOT EXISTS，通过 information_schema 检查实现幂等
+    
+    -- ---------------------------------------------------------------------------
+    -- kb_llm_model: 新增 currency 列
+    -- ---------------------------------------------------------------------------
+    SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kb_llm_model' AND COLUMN_NAME = 'currency');
+    SET @sql = IF(@col_exists = 0,
+        'ALTER TABLE kb_llm_model ADD COLUMN currency CHAR(3) NOT NULL DEFAULT ''CNY'' COMMENT ''计费币种：CNY=人民币, USD=美元'' AFTER output_price_per_1m',
+        'SELECT ''kb_llm_model.currency already exists, skipping'' AS message');
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    
+    -- ---------------------------------------------------------------------------
+    -- kb_llm_call_log: cost_usd -> cost_amount + cost_currency
+    -- ---------------------------------------------------------------------------
+    SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kb_llm_call_log' AND COLUMN_NAME = 'cost_amount');
+    SET @sql = IF(@col_exists = 0,
+        'ALTER TABLE kb_llm_call_log ADD COLUMN cost_amount DECIMAL(10,6) NULL COMMENT ''预估成本金额，币种见 cost_currency 列，失败时为 NULL'' AFTER total_tokens',
+        'SELECT ''kb_llm_call_log.cost_amount already exists, skipping'' AS message');
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    
+    SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kb_llm_call_log' AND COLUMN_NAME = 'cost_currency');
+    SET @sql = IF(@col_exists = 0,
+        'ALTER TABLE kb_llm_call_log ADD COLUMN cost_currency CHAR(3) NULL COMMENT ''成本币种：CNY=人民币, USD=美元，失败时为 NULL'' AFTER cost_amount',
+        'SELECT ''kb_llm_call_log.cost_currency already exists, skipping'' AS message');
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    
+    -- ---------------------------------------------------------------------------
+    -- 迁移已有数据（仅在旧列 cost_usd 仍存在时执行）
+    -- ---------------------------------------------------------------------------
+    SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kb_llm_call_log' AND COLUMN_NAME = 'cost_usd');
+    SET @sql = IF(@col_exists = 1,
+        'UPDATE kb_llm_call_log log JOIN kb_llm_model model ON log.model_id = model.id SET log.cost_amount = log.cost_usd, log.cost_currency = model.currency WHERE log.cost_usd IS NOT NULL',
+        'SELECT ''cost_usd not found, skipping data migration'' AS message');
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    
+    SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kb_llm_call_log' AND COLUMN_NAME = 'cost_usd');
+    SET @sql = IF(@col_exists = 1,
+        'UPDATE kb_llm_call_log SET cost_currency = ''CNY'' WHERE cost_amount IS NOT NULL AND cost_currency IS NULL',
+        'SELECT ''cost_usd not found, skipping CNY fillback'' AS message');
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    
+    -- ---------------------------------------------------------------------------
+    -- 删除旧列 cost_usd（幂等：列不存在时跳过）
+    -- ---------------------------------------------------------------------------
+    SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kb_llm_call_log' AND COLUMN_NAME = 'cost_usd');
+    SET @sql = IF(@col_exists = 1,
+        'ALTER TABLE kb_llm_call_log DROP COLUMN cost_usd',
+        'SELECT ''cost_usd not found, skipping drop'' AS message');
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+    
+  10_kb_pipeline_metrics.sql: |
+    -- kb_pipeline_run 工作流执行指标表
+    -- 每次工作流执行一行，记录 trace_id / 起止时间 / 终态 / 转化漏斗
+    -- 纯追加日志表（db-conventions §7.1 例外）：仅需 id + created_at，无 updated_at / is_deleted / deleted_at
+    -- PRD: _bmad-output/planning-artifacts/prd-pipeline-metrics.md
+    -- 架构: _bmad-output/planning-artifacts/arch-pipeline-metrics.md
+    
+    CREATE TABLE IF NOT EXISTS kb_pipeline_run (
+        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        trace_id        VARCHAR(16)      NOT NULL                COMMENT '链路追踪ID，关联 kb_node_metric.trace_id',
+        status          VARCHAR(20)      NOT NULL                COMMENT '执行终态 success/human_flagged/error',
+        started_at      DATETIME(3)      NULL                    COMMENT '工作流开始时间',
+        ended_at        DATETIME(3)      NULL                    COMMENT '工作流结束时间',
+        duration_ms     INT              NULL                    COMMENT '总耗时毫秒',
+        source_count    INT              NOT NULL DEFAULT 0      COMMENT '采集条目数（M5漏斗入口）',
+        analysis_count  INT              NOT NULL DEFAULT 0      COMMENT '分析条目数（M5漏斗中间）',
+        article_count   INT              NOT NULL DEFAULT 0      COMMENT '整理后条目数（M5漏斗中间）',
+        saved_count     INT              NOT NULL DEFAULT 0      COMMENT '保存条目数（M5漏斗出口）',
+        human_flagged   TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '是否被人工标记 0=否 1=是',
+        review_passed   TINYINT(1) UNSIGNED NOT NULL DEFAULT 0   COMMENT '审核是否通过 0=否 1=是',
+        iteration       INT              NOT NULL DEFAULT 0      COMMENT '审核循环次数',
+        total_cost_yuan DECIMAL(12,6)    NOT NULL DEFAULT 0.000000 COMMENT 'LLM总成本（元）',
+        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录创建时间',
+        PRIMARY KEY (id),
+        KEY idx_trace_id (trace_id),
+        KEY idx_status_created (status, created_at),
+        KEY idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工作流执行指标表（纯追加日志表）';
+    
+    
+    -- kb_node_metric 节点级指标表
+    -- 每个节点每次执行一行（含循环中的重复执行）
+    -- 通过 run_id 和 trace_id 关联到 kb_pipeline_run（应用层维护，非 FK）
+    -- 纯追加日志表（db-conventions §7.1 例外）
+    
+    CREATE TABLE IF NOT EXISTS kb_node_metric (
+        id              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        run_id          BIGINT UNSIGNED  NOT NULL                COMMENT '关联 kb_pipeline_run.id（应用层维护，非FK）',
+        trace_id        VARCHAR(16)      NOT NULL                COMMENT '链路追踪ID',
+        node_name       VARCHAR(20)      NOT NULL                COMMENT '节点名称 collect/analyze/review/organize/revise/save/human_flag',
+        duration_ms     INT              NOT NULL                COMMENT '节点耗时毫秒',
+        cost_data       JSON             NULL                    COMMENT '节点LLM成本数据 {prompt_tokens,completion_tokens,total_tokens}',
+        review_passed   TINYINT(1) UNSIGNED NULL                 COMMENT '审核是否通过（仅review节点填充）',
+        iteration       INT              NULL                    COMMENT '审核轮次（仅review节点填充）',
+        error           VARCHAR(500)     NOT NULL DEFAULT ''     COMMENT '错误信息（脱敏后，正常执行时为空）',
+        created_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '记录创建时间',
+        PRIMARY KEY (id),
+        KEY idx_run_id (run_id),
+        KEY idx_trace_id (trace_id),
+        KEY idx_node_created (node_name, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='节点级指标表（纯追加日志表）';
+    

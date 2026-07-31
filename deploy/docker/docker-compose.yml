@@ -15,14 +15,16 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/00_kb_article.sql:ro
       - ../../deploy/sql/01_kb_llm_provider.sql:/docker-entrypoint-initdb.d/01_kb_llm_provider.sql:ro
       - ../../deploy/sql/02_kb_llm_model.sql:/docker-entrypoint-initdb.d/02_kb_llm_model.sql:ro
       - ../../deploy/sql/03_kb_llm_health.sql:/docker-entrypoint-initdb.d/03_kb_llm_health.sql:ro
+      - ../../deploy/sql/04_kb_llm_provider_connectivity.sql:/docker-entrypoint-initdb.d/04_kb_llm_provider_connectivity.sql:ro
       - ../../deploy/sql/05_kb_article.sql:/docker-entrypoint-initdb.d/05_kb_article.sql:ro
       - ../../deploy/sql/06_kb_workflow_run.sql:/docker-entrypoint-initdb.d/06_kb_workflow_run.sql:ro
       - ../../deploy/sql/07_kb_distribution_log.sql:/docker-entrypoint-initdb.d/07_kb_distribution_log.sql:ro
       - ../../deploy/sql/08_kb_llm_call_log.sql:/docker-entrypoint-initdb.d/08_kb_llm_call_log.sql:ro
+      - ../../deploy/sql/09_add_currency.sql:/docker-entrypoint-initdb.d/09_add_currency.sql:ro
+      - ../../deploy/sql/10_kb_pipeline_metrics.sql:/docker-entrypoint-initdb.d/10_kb_pipeline_metrics.sql:ro
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
